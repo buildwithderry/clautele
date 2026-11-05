@@ -69,3 +69,16 @@ def test_load_dotenv(tmp_path):
     assert env["A2"] == "x=y"
     assert env["EXISTING"] == "lama"  # tidak menimpa
     assert load_dotenv(tmp_path / "tidak-ada", env) == 0
+
+
+def test_send_roots_default_is_outbox_only(tmp_path):
+    cfg = Config.from_env({**BASE, "CLAUDE_WORKDIR": str(tmp_path)})
+    assert cfg.send_roots == (tmp_path.resolve() / ".clautele" / "outbox",)
+    wide = Config.from_env({**BASE, "CLAUDE_WORKDIR": str(tmp_path), "SEND_ROOTS": f"{tmp_path}/a, {tmp_path}/b"})
+    assert [r.name for r in wide.send_roots] == ["a", "b"]
+
+
+def test_send_limits_validated():
+    for k, v in [("SEND_MAX_MB", "51"), ("UPLOAD_MAX_MB", "21"), ("SEND_MAX_MB", "x")]:
+        with pytest.raises(ConfigError):
+            Config.from_env({**BASE, k: v})

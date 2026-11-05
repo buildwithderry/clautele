@@ -4,6 +4,7 @@ Ngobrol dengan **Claude Code** yang berjalan di VPS Anda lewat **bot Telegram**.
 
 - Lihat proses CLI langsung di Telegram (tool yang dipakai, jawaban, biaya)
 - Claude bertanya → pilih tombol **atau** ketik jawaban sendiri
+- Kirim foto/dokumen ke Claude, dan Claude bisa mengirim file hasil kerjanya ke chat
 - Mulai/akhiri sesi kapan saja (`/start_claude`, `/end_claude`)
 - Tool yang ditolak bisa diizinkan dengan satu tombol
 - Aman secara default: hanya user ID yang Anda daftarkan, plus **2FA TOTP** (Google Authenticator, Aegis, Authy, dll.)
@@ -43,6 +44,18 @@ Ngobrol dengan **Claude Code** yang berjalan di VPS Anda lewat **bot Telegram**.
 | `/mode` | Ganti permission mode lewat tombol |
 | `/model <nama>` | Ganti model (kosong = default) |
 | `/id` | Tampilkan user ID Anda |
+
+## File dari dan ke Telegram
+
+- **Kirim ke Claude:** kirim foto atau dokumen (keterangan = instruksi, mis. "ringkas PDF ini"). File disimpan di
+  `<folder kerja>/.clautele/inbox/`; Claude bisa membaca gambar dan PDF. Suara/audio/video tersimpan, tetapi Claude
+  tidak otomatis bisa mendengar/menontonnya. Album foto diproses sebagai satu pesan. Maks 20 MB (batas Telegram).
+- **Terima dari Claude:** minta saja ("buatkan logo lalu kirim ke saya"). Claude menaruh file di
+  `<folder kerja>/.clautele/outbox/` dan bot mengirimkannya. Maks 50 MB, 5 file per balasan.
+- **Keamanan:** hanya `outbox/` yang boleh dikirim (lebarkan lewat `SEND_ROOTS`); `.env`, kunci, kredensial, dan
+  folder `.ssh`/`.aws`/`.claude`/`.git` selalu diblokir. Daftar blokir tidak bisa mengenali rahasia di berkas
+  bernama biasa (mis. `docker-compose.yml` berisi password), jadi jangan melebarkan `SEND_ROOTS` ke folder seperti itu.
+  Matikan semuanya dengan `SEND_FILES=false`.
 
 ## Pilih tingkat akses
 

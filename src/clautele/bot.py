@@ -6,6 +6,7 @@ import asyncio
 import logging
 import time
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from telegram import (
@@ -28,6 +29,16 @@ from telegram.ext import (
 from . import __version__
 from .asks import SYSTEM_PROMPT, Question, button_label, extract_question
 from .config import VALID_MODES, Config
+from .files import (
+    MAX_FILES_PER_REPLY,
+    FileRef,
+    SendError,
+    extract_files,
+    files_system_prompt,
+    inbox_target,
+    is_photo,
+    resolve_sendable,
+)
 from .runner import ClaudeRun, RunResult, assistant_blocks, build_args
 from .store import StateStore
 from .totp import TotpGate
@@ -50,6 +61,8 @@ HELP = (
     "/id: tampilkan Telegram user ID Anda\n"
     "/login `<kode>`: buka kunci dengan kode 2FA (jika 2FA aktif)\n"
     "/logout: kunci kembali\n\n"
+    "Anda juga bisa mengirim *foto atau dokumen* (dengan keterangan sebagai instruksi), dan Claude "
+    "bisa mengirim file hasil kerjanya ke chat ini.\n\n"
     "Setelah /start\\_claude, kirim pesan biasa sebagai prompt. Kalau Claude bertanya, "
     "pilih tombol *atau* ketik jawaban sendiri."
 )
@@ -346,10 +359,11 @@ class ClauteleBot:
         self, chat_id: int, prompt: str, progress: "_Progress", *, allow_retry: bool
     ) -> RunResult:
         state = self.store.get(chat_id)
-        full_cfg_prompt = SYSTEM_PROMPT
         cfg = self.cfg
-        if cfg.append_system_prompt:
-            full_cfg_prompt = f"{cfg.append_system_prompt}\n\n{SYSTEM_PROMPT}"
+        parts = [cfg.append_system_prompt, SYSTEM_PROMPT]
+        if cfg.send_files:
+            parts.append(files_system_prompt(cfg.outbox_dir, cfg.inbox_dir, cfg.send_max_mb))
+        full_cfg_prompt = "\n\n".join(p for p in parts if p)
         cfg = replace(cfg, append_system_prompt=full_cfg_prompt)
         args = build_args(
             cfg,
@@ -399,6 +413,7 @@ class ClauteleBot:
             text = "Claude gagal tanpa pesan."
             if result.stderr_tail:
                 text += "\n\n" + result.stderr_tail[-1500:]
+        text, file_refs = extract_files(text)
         body, question = extract_question(text)
         chunks = split_message(body) if body else []
 
@@ -413,6 +428,8 @@ class ClauteleBot:
 
         for chunk in chunks:
             await ctx.bot.send_message(chat_id, chunk)
+
+        await self._send_files(ctx, chat_id, file_refs)
 
         if question:
             ctx.chat_data.pop("pending_options", None)
@@ -434,6 +451,110 @@ class ClauteleBot:
             await ctx.bot.send_message(
                 chat_id, denial_note, reply_markup=InlineKeyboardMarkup(rows) if denied_tools else None
             )
+
+    async def _send_files(self, ctx: ContextTypes.DEFAULT_TYPE, chat_id: int, refs: list[FileRef]) -> None:
+        if not refs:
+            return
+        if not self.cfg.send_files:
+            await ctx.bot.send_message(chat_id, "⚠️ Claude mencoba mengirim file, tetapi SEND_FILES=false.")
+            return
+        for ref in refs[:MAX_FILES_PER_REPLY]:
+            try:
+                path = resolve_sendable(
+                    ref.path,
+                    workdir=self.cfg.workdir,
+                    roots=self.cfg.send_roots,
+                    max_bytes=self.cfg.send_max_mb * 1024 * 1024,
+                )
+            except SendError as exc:
+                log.warning("Pengiriman file ditolak: %s (%s)", ref.path, exc)
+                await ctx.bot.send_message(chat_id, f"⚠️ Tidak mengirim {Path(ref.path).name}: {exc}")
+                continue
+            try:
+                with path.open("rb") as fh:
+                    if is_photo(path):
+                        await ctx.bot.send_photo(chat_id, fh, caption=ref.caption or None)
+                    else:
+                        await ctx.bot.send_document(
+                            chat_id, fh, filename=path.name, caption=ref.caption or None
+                        )
+            except TelegramError as exc:
+                log.warning("Telegram gagal menerima %s: %s", path.name, exc)
+                await ctx.bot.send_message(chat_id, f"⚠️ Gagal mengirim {path.name}: {exc}")
+        if len(refs) > MAX_FILES_PER_REPLY:
+            await ctx.bot.send_message(
+                chat_id, f"ℹ️ {len(refs) - MAX_FILES_PER_REPLY} file lagi tidak dikirim (maks {MAX_FILES_PER_REPLY} per balasan)."
+            )
+
+    # ---------- file masuk dari user ----------
+
+    @staticmethod
+    def _pick_attachment(msg: Any) -> tuple[Any, str | None, str] | None:
+        if msg.photo:
+            return msg.photo[-1], "foto.jpg", "foto"
+        if msg.document:
+            return msg.document, msg.document.file_name, "dokumen"
+        if msg.voice:
+            return msg.voice, "voice.ogg", "pesan suara"
+        if msg.audio:
+            return msg.audio, msg.audio.file_name or "audio.mp3", "audio"
+        if msg.video:
+            return msg.video, msg.video.file_name or "video.mp4", "video"
+        if msg.video_note:
+            return msg.video_note, "video-note.mp4", "video note"
+        return None
+
+    async def on_file(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._allowed(update):
+            return await self._deny(update)
+        msg = update.effective_message
+        chat_id = update.effective_chat.id
+        if not self.store.get(chat_id).active:
+            return await msg.reply_text("Sesi Claude belum aktif. Kirim /start_claude dulu.")
+        picked = self._pick_attachment(msg)
+        if picked is None:
+            return
+        obj, name, kind = picked
+        limit = self.cfg.upload_max_mb * 1024 * 1024
+        if (obj.file_size or 0) > limit:
+            return await msg.reply_text(
+                f"⚠️ File terlalu besar ({(obj.file_size or 0) // (1024 * 1024)} MB). Batas {self.cfg.upload_max_mb} MB."
+            )
+        target = inbox_target(self.cfg.inbox_dir, name, fallback=kind.replace(" ", "-"))
+        try:
+            tg_file = await obj.get_file()
+            await tg_file.download_to_drive(custom_path=target)
+        except TelegramError as exc:
+            log.warning("Gagal mengunduh file dari Telegram: %s", exc)
+            return await msg.reply_text(f"⚠️ Gagal mengunduh file: {exc}")
+        entry = (target, kind)
+        caption = (msg.caption or "").strip()
+
+        group = msg.media_group_id
+        if group:  # album: kumpulkan sebentar agar jadi satu prompt
+            albums = ctx.bot_data.setdefault("albums", {})
+            first = group not in albums
+            album = albums.setdefault(group, {"files": [], "caption": ""})
+            album["files"].append(entry)
+            album["caption"] = album["caption"] or caption
+            if first:
+                asyncio.create_task(self._flush_album(ctx, chat_id, group))
+            return
+        await self.run_prompt(ctx, chat_id, self.build_file_prompt([entry], caption))
+
+    async def _flush_album(self, ctx: ContextTypes.DEFAULT_TYPE, chat_id: int, group: str) -> None:
+        await asyncio.sleep(1.5)
+        album = ctx.bot_data.get("albums", {}).pop(group, None)
+        if album:
+            await self.run_prompt(ctx, chat_id, self.build_file_prompt(album["files"], album["caption"]))
+
+    @staticmethod
+    def build_file_prompt(files: list[tuple[Path, str]], caption: str) -> str:
+        lines = [f"- {path} ({kind})" for path, kind in sorted(files, key=lambda f: str(f[0]))]
+        head = "Pengguna mengirim file berikut lewat Telegram:\n" + "\n".join(lines)
+        if caption:
+            return f"{head}\n\nPesan pengguna: {caption}"
+        return head + "\n\nPengguna tidak menulis instruksi. Periksa isinya, ringkas singkat, lalu tanyakan apa yang diinginkan."
 
     def _ask_markup(self, ctx: ContextTypes.DEFAULT_TYPE, q: Question) -> InlineKeyboardMarkup | None:
         if not q.options:
@@ -461,6 +582,17 @@ class ClauteleBot:
         app.add_handler(CommandHandler("model", self.cmd_model))
         app.add_handler(CallbackQueryHandler(self.on_callback))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.on_text))
+        app.add_handler(
+            MessageHandler(
+                filters.PHOTO
+                | filters.Document.ALL
+                | filters.VOICE
+                | filters.AUDIO
+                | filters.VIDEO
+                | filters.VIDEO_NOTE,
+                self.on_file,
+            )
+        )
 
     @staticmethod
     async def post_init(app: Application) -> None:

@@ -52,3 +52,19 @@ ID melekat pada akun.
 - **Batas yang jujur:** 2FA melindungi dari pemakai akun Telegram yang dicuri, bukan dari penyerang yang sudah punya
   akses ke server atau `.env` (secret ada di sana). Karena itu `.env` harus `chmod 600`.
 - Jam server harus akurat (NTP); toleransi hanya ±30 detik.
+
+## 8. File dari dan ke Telegram (v0.3.0)
+Bug yang dilaporkan: Claude menjawab "file ada di sandbox, tidak bisa dikirim" dan tidak bisa membaca file user,
+karena bot hanya meneruskan teks. Perbaikan:
+- **Keluar:** penanda `<<FILE>>{json}<<END>>` (pola sama dengan `<<ASK>>`). Diverifikasi dengan Claude asli (haiku):
+  file dibuat di `outbox/` dan penanda valid.
+- **Masuk:** file diunduh ke `.clautele/inbox/<waktu>-<nama-aman>`, prompt memuat path absolut; Claude membaca dengan
+  tool Read. Album digabung lewat debounce 1,5 detik per `media_group_id`.
+- **Ancaman:** mengirim file ke Telegram = jalur eksfiltrasi bila Claude terkena prompt injection. Lapisan: (1) root
+  default hanya `outbox/`, (2) `resolve()` mengikuti symlink sebelum cek root, (3) denylist nama (`.env`, kunci,
+  kredensial) dan folder (`.ssh`, `.git`, …) pada path asli maupun yang diminta, (4) batas ukuran dan jumlah,
+  (5) 2FA di depan semuanya, (6) `SEND_FILES=false` mematikan.
+- **Batas jujur:** denylist tidak bisa mengenali rahasia di berkas bernama biasa. Penyerang yang sudah menguasai Claude
+  masih bisa menyalin isi rahasia ke `outbox/` dengan nama lain. Mitigasinya ada di izin tool (Bash tidak diizinkan
+  permanen) dan 2FA, bukan di filter ini.
+- Suara/audio/video disimpan tetapi tidak ditranskripsi (belum ada tool untuk itu).

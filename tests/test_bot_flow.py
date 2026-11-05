@@ -34,6 +34,12 @@ class FakeBot:
     async def send_chat_action(self, *a, **kw):
         pass
 
+    async def send_photo(self, chat_id, fh, caption=None, **kw):
+        self.sent.append(SimpleNamespace(kind="photo", data=fh.read(), caption=caption, text=f"[foto] {caption}", reply_markup=None))
+
+    async def send_document(self, chat_id, fh, filename=None, caption=None, **kw):
+        self.sent.append(SimpleNamespace(kind="doc", data=fh.read(), filename=filename, caption=caption, text=f"[dokumen] {filename}", reply_markup=None))
+
 
 def make(tmp_path, script_body, extra_env=None):
     script = tmp_path / "fake_claude.py"
@@ -52,7 +58,7 @@ def make(tmp_path, script_body, extra_env=None):
     )
     store = StateStore(tmp_path / "state.json")
     bot = ClauteleBot(cfg, store)
-    ctx = SimpleNamespace(bot=FakeBot(), chat_data={}, args=[])
+    ctx = SimpleNamespace(bot=FakeBot(), chat_data={}, bot_data={}, args=[])
     return bot, ctx, store
 
 
@@ -218,3 +224,154 @@ async def test_login_unlisted_user_still_denied(tmp_path):
     upd = FakeUpdate(999)
     await bot.cmd_login(upd, ctx)
     assert "tidak diizinkan" in upd.replies[0]
+
+
+# ---------- file keluar / masuk ----------
+
+FILE_CLAUDE = """
+import json, sys, os
+sys.stdin.read()
+os.makedirs(".clautele/outbox", exist_ok=True)
+open(".clautele/outbox/laporan.pdf", "wb").write(b"%PDF-isi")
+open(".clautele/outbox/logo.png", "wb").write(b"PNGDATA")
+open(".env", "w").write("TOKEN=rahasia")
+txt = ('Ini filenya.\\n'
+       '<<FILE>>{"path": ".clautele/outbox/laporan.pdf", "caption": "Laporan"}<<END>>\\n'
+       '<<FILE>>{"path": ".clautele/outbox/logo.png"}<<END>>\\n'
+       '<<FILE>>{"path": ".env"}<<END>>\\n'
+       '<<FILE>>{"path": "/etc/hostname"}<<END>>')
+print(json.dumps({"type": "result", "subtype": "success", "is_error": False,
+    "session_id": "F1", "result": txt}), flush=True)
+"""
+
+
+async def test_files_sent_and_secrets_refused(tmp_path):
+    bot, ctx, _ = make(tmp_path, FILE_CLAUDE)
+    await bot.run_prompt(ctx, 1, "kirim laporan")
+    sent = ctx.bot.sent
+    docs = [m for m in sent if getattr(m, "kind", "") == "doc"]
+    photos = [m for m in sent if getattr(m, "kind", "") == "photo"]
+    assert [d.filename for d in docs] == ["laporan.pdf"] and docs[0].caption == "Laporan"
+    assert docs[0].data == b"%PDF-isi"
+    assert len(photos) == 1 and photos[0].data == b"PNGDATA"
+    texts = " ".join(m.text for m in sent)
+    assert "<<FILE>>" not in texts  # penanda tidak bocor
+    assert "Tidak mengirim .env" in texts and "Tidak mengirim hostname" in texts
+    assert "TOKEN=rahasia" not in texts and not any(getattr(m, "data", b"") == b"TOKEN=rahasia" for m in sent)
+
+
+async def test_file_outside_outbox_refused_by_default(tmp_path):
+    bot, ctx, _ = make(tmp_path, FILE_CLAUDE)
+    (bot.cfg.workdir).mkdir(parents=True, exist_ok=True)
+    (bot.cfg.workdir / "catatan.txt").write_text("biasa")
+    refs = [type("R", (), {"path": "catatan.txt", "caption": ""})()]
+    await bot._send_files(ctx, 1, refs)
+    assert "di luar folder" in ctx.bot.sent[-1].text  # bukan di outbox
+
+
+async def test_send_files_disabled(tmp_path):
+    bot, ctx, _ = make(tmp_path, FILE_CLAUDE, {"SEND_FILES": "false"})
+    await bot.run_prompt(ctx, 1, "kirim")
+    assert not any(getattr(m, "kind", "") in ("doc", "photo") for m in ctx.bot.sent)
+    assert any("SEND_FILES=false" in m.text for m in ctx.bot.sent)
+
+
+ECHO_CLAUDE = """
+import json, sys
+prompt = sys.stdin.read()
+print(json.dumps({"type": "result", "subtype": "success", "is_error": False,
+    "session_id": "E1", "result": "PROMPT:" + prompt}), flush=True)
+"""
+
+
+class FakeTgFile:
+    def __init__(self, payload):
+        self.payload = payload
+
+    async def download_to_drive(self, custom_path):
+        from pathlib import Path
+
+        Path(custom_path).write_bytes(self.payload)
+
+
+class FakeAttachment:
+    def __init__(self, payload=b"data", size=None, file_name=None):
+        self.payload, self.file_size, self.file_name = payload, size or len(payload), file_name
+
+    async def get_file(self):
+        return FakeTgFile(self.payload)
+
+
+class FileUpdate(FakeUpdate):
+    def __init__(self, uid, **fields):
+        super().__init__(uid)
+        self.effective_message.photo = fields.get("photo")
+        self.effective_message.document = fields.get("document")
+        for k in ("voice", "audio", "video", "video_note"):
+            setattr(self.effective_message, k, fields.get(k))
+        self.effective_message.caption = fields.get("caption")
+        self.effective_message.media_group_id = fields.get("group")
+
+
+async def _active(bot, ctx):
+    await bot.cmd_start_claude(FakeUpdate(5), ctx)
+
+
+async def test_incoming_photo_saved_and_forwarded(tmp_path):
+    bot, ctx, store = make(tmp_path, ECHO_CLAUDE)
+    await _active(bot, ctx)
+    upd = FileUpdate(5, photo=[FakeAttachment(b"kecil"), FakeAttachment(b"JPEGBYTES")], caption="ini apa?")
+    await bot.on_file(upd, ctx)
+
+    saved = list((bot.cfg.inbox_dir).glob("*"))
+    assert len(saved) == 1 and saved[0].read_bytes() == b"JPEGBYTES"  # ukuran terbesar dipilih
+    final = [m.text for m in ctx.bot.sent if m.text.startswith("PROMPT:")][0]
+    assert str(saved[0]) in final and "ini apa?" in final
+
+
+async def test_incoming_document_name_sanitized(tmp_path):
+    bot, ctx, _ = make(tmp_path, ECHO_CLAUDE)
+    await _active(bot, ctx)
+    doc = FakeAttachment(b"%PDF", file_name="../../etc/laporan akhir.pdf")
+    await bot.on_file(FileUpdate(5, document=doc), ctx)
+    saved = list(bot.cfg.inbox_dir.glob("*"))
+    assert len(saved) == 1 and saved[0].parent == bot.cfg.inbox_dir  # tidak keluar dari inbox
+    assert saved[0].name.endswith("laporan_akhir.pdf")
+
+
+async def test_incoming_file_too_large_rejected(tmp_path):
+    bot, ctx, _ = make(tmp_path, ECHO_CLAUDE, {"UPLOAD_MAX_MB": "1"})
+    await _active(bot, ctx)
+    upd = FileUpdate(5, document=FakeAttachment(b"x", size=5 * 1024 * 1024, file_name="b.bin"))
+    await bot.on_file(upd, ctx)
+    assert "terlalu besar" in upd.replies[0]
+    assert not list(bot.cfg.inbox_dir.glob("*")) if bot.cfg.inbox_dir.exists() else True
+
+
+async def test_incoming_file_requires_active_session_and_auth(tmp_path):
+    bot, ctx, _ = make(tmp_path, ECHO_CLAUDE)
+    inactive = FileUpdate(5, document=FakeAttachment(b"x", file_name="a.txt"))
+    await bot.on_file(inactive, ctx)
+    assert "/start_claude" in inactive.replies[0]
+    stranger = FileUpdate(999, document=FakeAttachment(b"x", file_name="a.txt"))
+    await bot.on_file(stranger, ctx)
+    assert "tidak diizinkan" in stranger.replies[0]
+    assert not bot.cfg.inbox_dir.exists()
+
+
+async def test_album_batched_into_single_prompt(tmp_path, monkeypatch):
+    import asyncio
+
+    bot, ctx, _ = make(tmp_path, ECHO_CLAUDE)
+    await _active(bot, ctx)
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr("clautele.bot.asyncio.sleep", lambda s: real_sleep(0.05))
+    for i in range(3):
+        await bot.on_file(
+            FileUpdate(5, photo=[FakeAttachment(f"p{i}".encode())], group="G1", caption="bandingkan" if i == 0 else None),
+            ctx,
+        )
+    await real_sleep(0.6)
+    finals = [m.text for m in ctx.bot.sent if m.text.startswith("PROMPT:")]
+    assert len(finals) == 1  # satu giliran untuk seluruh album
+    assert finals[0].count("(foto)") == 3 and "bandingkan" in finals[0]

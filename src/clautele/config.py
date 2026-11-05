@@ -82,6 +82,18 @@ class Config:
     totp_secret: str | None = None
     totp_session_minutes: int = 60
     sandboxed: bool = False  # True di image Docker (CLAUTELE_SANDBOX=docker)
+    send_files: bool = True
+    send_roots: tuple[Path, ...] = ()
+    send_max_mb: int = 50
+    upload_max_mb: int = 20
+
+    @property
+    def outbox_dir(self) -> Path:
+        return self.workdir / ".clautele" / "outbox"
+
+    @property
+    def inbox_dir(self) -> Path:
+        return self.workdir / ".clautele" / "inbox"
     extra_args: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
@@ -139,10 +151,23 @@ class Config:
         if not 1 <= session_minutes <= 1440:
             raise ConfigError("TOTP_SESSION_MINUTES harus antara 1 dan 1440.")
 
+        workdir = Path(e.get("CLAUDE_WORKDIR", "./workspace")).expanduser().resolve()
+        roots_raw = [r.strip() for r in e.get("SEND_ROOTS", "").replace(";", ",").split(",") if r.strip()]
+        send_roots = tuple(Path(r).expanduser().resolve() for r in roots_raw) or (workdir / ".clautele" / "outbox",)
+        try:
+            send_max_mb = int(e.get("SEND_MAX_MB", "50") or "50")
+            upload_max_mb = int(e.get("UPLOAD_MAX_MB", "20") or "20")
+        except ValueError as exc:
+            raise ConfigError("SEND_MAX_MB dan UPLOAD_MAX_MB harus bilangan bulat.") from exc
+        if not 1 <= send_max_mb <= 50:
+            raise ConfigError("SEND_MAX_MB harus 1-50 (batas upload bot Telegram 50 MB).")
+        if not 1 <= upload_max_mb <= 20:
+            raise ConfigError("UPLOAD_MAX_MB harus 1-20 (batas unduh bot Telegram 20 MB).")
+
         return cls(
             telegram_token=token,
             allowed_user_ids=allowed,
-            workdir=Path(e.get("CLAUDE_WORKDIR", "./workspace")).expanduser().resolve(),
+            workdir=workdir,
             data_dir=Path(e.get("DATA_DIR", "./data")).expanduser().resolve(),
             claude_bin=e.get("CLAUDE_BIN", "claude").strip() or "claude",
             permission_mode=mode,
@@ -157,5 +182,9 @@ class Config:
             totp_secret=totp_secret,
             totp_session_minutes=session_minutes,
             sandboxed=sandboxed,
+            send_files=_bool(e.get("SEND_FILES"), True),
+            send_roots=send_roots,
+            send_max_mb=send_max_mb,
+            upload_max_mb=upload_max_mb,
             extra_args=tuple(shlex.split(e.get("CLAUDE_EXTRA_ARGS", ""))),
         )

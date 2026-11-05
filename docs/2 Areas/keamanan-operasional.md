@@ -19,6 +19,11 @@
 - [ ] Secret TOTP tidak pernah ditempel ke chat; jika terlanjur, buat baru dengan `python -m clautele.totp`
 - [ ] `journalctl --user -u clautele` tidak memuat token (diredam di `__main__.py`)
 
+## File keluar
+- [ ] `SEND_ROOTS` kosong atau sempit; jangan menunjuk ke folder berisi file konfigurasi proyek lain
+- [ ] `ls <workdir>/.clautele/outbox` sesekali: bersihkan file lama
+- [ ] `SEND_FILES=false` bila bot dipakai di lingkungan yang tidak mengizinkan data keluar
+
 ## Fakta yang perlu diingat
 - Izin "Bash" yang diberikan lewat tombol berlaku untuk **semua** perintah Bash sampai `/end_claude`.
 - Claude di container hanya melihat `/workspace`, tetapi punya akses jaringan keluar.
