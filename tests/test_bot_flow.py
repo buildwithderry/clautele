@@ -482,3 +482,39 @@ async def test_stale_or_foreign_grant_callbacks_rejected(tmp_path):
     stranger = FakeQuery("grant:0")
     await bot.on_callback(SimpleNamespace(callback_query=stranger, effective_user=SimpleNamespace(id=999), effective_chat=SimpleNamespace(id=1)), ctx)
     assert store.get(1).granted_tools == []  # user di luar allowlist tidak bisa memberi izin
+
+
+ALLOWED_CLAUDE = """
+import json, sys
+sys.stdin.read()
+a = sys.argv
+tools = a[a.index("--allowed-tools") + 1] if "--allowed-tools" in a else ""
+sp = a[a.index("--append-system-prompt") + 1]
+print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": "T1",
+    "result": "TOOLS:" + tools + "|SP:" + sp}), flush=True)
+"""
+
+
+async def test_video_maker_auto_allowed_only_when_installed(tmp_path, monkeypatch):
+    have = {"ffmpeg": "/usr/bin/ffmpeg", "clautele-video": "/usr/local/bin/clautele-video"}
+    monkeypatch.setattr("clautele.bot.shutil.which", lambda n: have.get(n))
+    bot, ctx, _ = make(tmp_path, ALLOWED_CLAUDE)
+    await bot.run_prompt(ctx, 1, "buat video")
+    out = " ".join(m.text for m in ctx.bot.sent)
+    assert "Bash(clautele-video *)" in out.split("|SP:")[0]  # diizinkan otomatis
+    assert "clautele-video spec.json" in out and "DILARANG" in out  # panduan masuk prompt
+
+    (tmp_path / "b").mkdir()
+    bot2, ctx2, _ = make(tmp_path / "b", ALLOWED_CLAUDE)
+    monkeypatch.setattr("clautele.bot.shutil.which", lambda n: None)
+    await bot2.run_prompt(ctx2, 1, "buat video")
+    out2 = " ".join(m.text for m in ctx2.bot.sent)
+    assert "clautele-video" not in out2  # tanpa ffmpeg: tidak diizinkan dan tidak disebut
+
+
+async def test_video_maker_not_allowed_when_file_sending_disabled(tmp_path, monkeypatch):
+    have = {"ffmpeg": "/usr/bin/ffmpeg", "clautele-video": "/usr/local/bin/clautele-video"}
+    monkeypatch.setattr("clautele.bot.shutil.which", lambda n: have.get(n))
+    bot, ctx, _ = make(tmp_path, ALLOWED_CLAUDE, {"SEND_FILES": "false"})
+    await bot.run_prompt(ctx, 1, "x")
+    assert "Bash(clautele-video *)" not in " ".join(m.text for m in ctx.bot.sent)

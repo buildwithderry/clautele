@@ -127,11 +127,32 @@ def is_video(path: Path) -> bool:
     return path.suffix.lower() in VIDEO_EXTS
 
 
-def video_system_prompt(outbox: Path, inbox: Path, max_mb: int) -> str:
-    """Panduan memakai ffmpeg; hanya diberikan bila ffmpeg benar-benar terpasang."""
+def video_system_prompt(outbox: Path, inbox: Path, max_mb: int, has_maker: bool = False) -> str:
+    """Panduan video untuk Claude; hanya diberikan bila ffmpeg benar-benar terpasang."""
     target = max(1, max_mb - 5)
+    rule = (
+        "ATURAN VIDEO (wajib): jika user meminta video, animasi, reel, story, atau konten video apa pun, "
+        "hasilnya HARUS file MP4 yang kamu buat sendiri lalu kirim lewat penanda <<FILE>>. DILARANG menjawab "
+        "dengan HTML, CSS, JavaScript, skrip, atau instruksi merekam layar/memakai aplikasi lain. "
+        "Jika Bash ditolak karena izin, tetap pakai Bash (user menyetujui lewat tombol); jangan beralih ke format lain. "
+    )
+    maker = (
+        "Untuk video bergaya slide/teks neon (konten Instagram, penjelasan poin demi poin, promo, ajakan komentar): "
+        f"tulis spec JSON dengan tool Write (JANGAN heredoc/cat lewat Bash), lalu jalankan `clautele-video spec.json {outbox}/nama.mp4` "
+        "dengan Bash timeout 600000 (render bisa beberapa menit). "
+        'Spec: {"size":"story|square|portrait|landscape|WxH","fps":30,"footer":"@akun","audio":"musik.mp3 (opsional)",'
+        '"scenes":[{"label":"01","title":"JUDUL","body":"isi singkat","color":"cyan|magenta|green|yellow|orange|red|blue|purple|white|#RRGGBB","duration":4}]}. '
+        "Maks 40 scene dan 180 detik. Pecah materi jadi scene pendek: judul <= 6 kata, isi <= 2 kalimat, 3-5 detik. "
+        "Gunakan story (9:16) untuk Instagram Reels/Story, portrait untuk feed. Jalankan `clautele-video --help` bila ragu. "
+        "Perintah ini mengizinkan dirinya sendiri; rendernya memakan waktu sekitar 3-4x durasi video, jadi jangan membuat video lebih panjang dari yang diminta. "
+        "Untuk efek lain atau mengedit video yang sudah ada, pakai ffmpeg langsung. "
+        if has_maker
+        else ""
+    )
     return (
-        "ffmpeg dan ffprobe tersedia lewat Bash. "
+        rule
+        + maker
+        + "ffmpeg dan ffprobe tersedia lewat Bash. "
         f"MEMBUAT/MENGEDIT video untuk user: simpan hasil di {outbox} sebagai MP4 agar bisa diputar langsung di "
         "Telegram: `-c:v libx264 -pix_fmt yuv420p -c:a aac -movflags +faststart` (tanpa audio: `-an`). "
         f"Ukuran akhir harus di bawah {target} MB; jika lebih, turunkan resolusi (`-vf scale=-2:720`) atau naikkan "

@@ -6,6 +6,26 @@ bisa terjadi di versi minor dan akan ditandai **BREAKING**.
 
 ## [Belum dirilis]
 
+## [0.5.0] - 2026-11-06
+
+### Ditambahkan
+- **`clautele-video`**: renderer video slide bergaya neon (MP4 H.264) dari spec JSON, berbasis ffmpeg. Latar gelap +
+  grid, teks berpendar (glow), bingkai neon, animasi masuk/keluar, footer, audio opsional, ukuran story/square/portrait/
+  landscape atau `WxH`. Maks 40 scene dan 180 detik; teks tak muat diperkecil otomatis dan hanya dipotong (`…`) sebagai
+  jalan terakhir. Dipakai Claude lewat satu perintah yang diizinkan otomatis (`Bash(clautele-video *)`), output hanya
+  boleh di dalam folder kerja. Mode host: dipasang oleh `deploy/install-host.sh` ke `~/.local/bin`.
+
+### Diperbaiki
+- **Permintaan video dijawab dengan file HTML** ("buka di browser lalu rekam layar"). Penyebab: `Write` diizinkan
+  otomatis sedangkan `Bash` (ffmpeg) butuh tombol izin, sehingga Claude memilih jalur tanpa izin. Sekarang instruksi
+  sistem mewajibkan hasil MP4, melarang HTML/skrip/rekam layar, dan melarang berganti format bila Bash ditolak; alat
+  `clautele-video` tidak memerlukan izin.
+- Instruksi video menyuruh menulis spec dengan `Write` (bukan heredoc via Bash, yang memicu tombol izin yang tidak perlu).
+
+### Catatan
+- Render sekitar 3-4x durasi video di server 2 CPU (video 73 detik ≈ 4 menit).
+- Whisper (transkripsi/subtitle) bergeser ke v0.6.0.
+
 ## [0.4.0] - 2026-11-06
 
 ### Ditambahkan
@@ -69,7 +89,8 @@ bisa terjadi di versi minor dan akan ditandai **BREAKING**.
 - Docker multi-stage (test + runtime non-root), `docker-compose.yml`, `.env.example`.
 - Dokumentasi PARA di `docs/`.
 
-[Belum dirilis]: https://github.com/buildwithderry/clautele/compare/v0.4.0...HEAD
+[Belum dirilis]: https://github.com/buildwithderry/clautele/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/buildwithderry/clautele/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/buildwithderry/clautele/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/buildwithderry/clautele/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/buildwithderry/clautele/compare/v0.1.0...v0.2.0

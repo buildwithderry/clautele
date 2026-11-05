@@ -43,6 +43,10 @@ COPY src ./src
 
 # Image node:22 menyediakan user 'node' (uid 1000). Claude Code menolak
 # bypassPermissions sebagai root, jadi jalankan sebagai non-root.
+# Perintah renderer video neon untuk Claude (lihat src/clautele/videomaker.py)
+RUN printf '#!/bin/sh\nexec python -m clautele.videomaker "$@"\n' > /usr/local/bin/clautele-video \
+    && chmod 755 /usr/local/bin/clautele-video
+
 RUN mkdir -p /workspace /data && chown -R node:node /workspace /data
 USER node
 ENV CLAUTELE_SANDBOX=docker \

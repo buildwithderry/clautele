@@ -24,6 +24,7 @@
 | Tag | Commit | Isi |
 |---|---|---|
 | v0.1.0 | 53f75b5 | Bot Telegram + Docker + dokumentasi PARA |
+| v0.5.0 | (lihat `git show v0.5.0`) | `clautele-video` neon, perbaikan "video dijawab HTML" |
 | v0.4.0 | (lihat `git show v0.4.0`) | Video (kirim, buat, edit), izin per perintah |
 | v0.3.0 | (lihat `git show v0.3.0`) | Kirim/terima file, foto, dokumen |
 | v0.2.0 | 64daa7c | Mode host + 2FA TOTP |

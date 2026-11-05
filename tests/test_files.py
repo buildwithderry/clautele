@@ -147,3 +147,11 @@ def test_video_prompt_content(ws):
     text = video_system_prompt(ws / "out", ws / "in", 50)
     for needle in ("libx264", "yuv420p", "faststart", "ffprobe", "45 MB", str(ws / "out"), str(ws / "in"), "Read"):
         assert needle in text, needle
+
+
+def test_video_prompt_forbids_html_and_names_tool(ws):
+    with_maker = video_system_prompt(ws / "out", ws / "in", 50, has_maker=True)
+    for needle in ("DILARANG", "HTML", "MP4", "clautele-video spec.json", "story", "jangan beralih ke format lain", "JANGAN heredoc", "timeout 600000"):
+        assert needle in with_maker, needle
+    without = video_system_prompt(ws / "out", ws / "in", 50, has_maker=False)
+    assert "DILARANG" in without and "clautele-video" not in without  # larangan HTML tetap ada

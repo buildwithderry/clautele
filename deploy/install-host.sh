@@ -32,6 +32,8 @@ fi
 
 command -v ffmpeg >/dev/null || echo "Catatan: ffmpeg tidak ditemukan; fitur video nonaktif. Opsional: sudo apt install ffmpeg fonts-dejavu-core"
 
+mkdir -p "$HOME/.local/bin" && ln -sf "$REPO/deploy/clautele-video" "$HOME/.local/bin/clautele-video"
+
 say "Memeriksa .env"
 if [ ! -f .env ]; then
   cp .env.example .env && chmod 600 .env

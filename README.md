@@ -63,6 +63,11 @@ Ngobrol dengan **Claude Code** yang berjalan di VPS Anda lewat **bot Telegram**.
 Image Docker menyertakan `ffmpeg` dan `ffprobe`. Contoh permintaan: *"buat video 5 detik latar biru dengan tulisan Halo"*,
 atau kirim video dengan keterangan *"potong menit 0:10–0:25 lalu kecilkan jadi 720p"*.
 
+- **Video bergaya neon/slide** (konten Instagram, penjelasan poin demi poin, promo): minta saja, mis. *"buatkan video
+  Instagram gaya neon tentang apa itu EA, lalu ajak komen MAU"*. Claude menulis spec JSON dan memakai perintah
+  `clautele-video` (renderer bawaan, diizinkan otomatis, tanpa tombol izin). Format 9:16 untuk Reels/Story, atau
+  square/portrait/landscape. Cek sendiri: `docker compose exec clautele clautele-video --example`.
+- Waktu render sekitar 3-4x durasi video di server 2 CPU (video 1 menit ≈ 3-4 menit).
 - Hasil dikirim sebagai MP4 yang bisa diputar langsung (maks 50 MB; Claude diminta menjaga di bawah ±45 MB).
 - Video dari Anda maksimal 20 MB (batas Bot API Telegram). Claude **tidak bisa menonton atau mendengar** video: ia
   mengambil beberapa frame lewat ffmpeg dan membacanya sebagai gambar.

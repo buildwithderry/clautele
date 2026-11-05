@@ -76,7 +76,7 @@ dengan `send_video(supports_streaming=True)` agar bisa diputar; MP4 H.264 + AAC 
   "melihat" video lewat frame. Remotion (video dari kode React) butuh Chromium + Node di image, ratusan MB tambahan, dan
   memiliki lisensi khusus (setahu saya gratis untuk individu/tim kecil, berbayar untuk perusahaan lebih besar; cek
   remotion.dev/license). Tidak cocok jadi bawaan repo yang dibagikan. Opsi nanti: varian image terpisah.
-- **Whisper ditunda ke v0.5.0.** Berguna untuk transkripsi pesan suara dan subtitle otomatis. Rencana: `faster-whisper`
+- **Whisper ditunda ke v0.6.0.** Berguna untuk transkripsi pesan suara dan subtitle otomatis. Rencana: `faster-whisper`
   (CTranslate2, tanpa PyTorch) model `small`/`base` int8, opsional lewat build arg agar image default tidak membengkak.
   VPS pemilik: 2 CPU, 7,6 GB RAM, jadi `small` jalan tetapi lambat; model diunduh saat pertama dipakai.
 - **Verifikasi izin dengan Claude asli (2.1.318):** `Bash(ffmpeg *)` hanya mengizinkan ffmpeg; perintah berantai
@@ -89,3 +89,25 @@ dengan `send_video(supports_streaming=True)` agar bisa diputar; MP4 H.264 + AAC 
   ffmpeg/ffprobe, dan penanda `<<FILE>>` lolos validasi.
 - **Biaya:** image 1,07 GB → 1,7 GB (ffmpeg Debian membawa banyak dependensi). Alternatif lebih kecil: binary ffmpeg statis
   (mengunduh dari luar, perlu verifikasi checksum), belum dipilih.
+
+## 10. `clautele-video` dan aturan "video = MP4" (v0.5.0)
+Laporan: diminta "animasi video neon untuk Instagram", Claude menulis file HTML dan menyuruh user merekam layar.
+- **Akar masalah (insentif, bukan kemampuan):** `Write` otomatis diizinkan di mode acceptEdits, sedangkan `Bash` butuh
+  tombol izin. Claude mengambil jalur tanpa hambatan. Panduan ffmpeg v0.4.0 hanya menyarankan, tidak melarang HTML.
+- **Perbaikan dua lapis:** (1) instruksi sistem: video HARUS MP4, DILARANG HTML/skrip/rekam layar, jangan ganti format
+  bila Bash ditolak; (2) alat bawaan `clautele-video` yang diizinkan otomatis, sehingga jalur yang benar juga jalur
+  termudah. Pelajaran umum: kalau perilaku yang diinginkan butuh izin, sediakan alat yang sudah diizinkan, bukan hanya
+  larangan.
+- **Mengapa renderer sendiri, bukan filter ffmpeg mentah:** efek neon multi-scene dengan teks berbungkus, glow, dan
+  animasi sulit dirangkai model dalam satu kali jalan dan hasilnya tidak konsisten. Spec JSON deterministik, bisa
+  divalidasi (batas scene/durasi/teks, path), dan diuji.
+- **Teknik:** tiap scene = satu panggilan ffmpeg: latar `drawgrid` + `vignette`; teks via `textfile=` (menghindari
+  escape karakter khusus); glow = lapisan teks diburamkan di setengah resolusi lalu `blend=screen`; inti teks diputihkan
+  60% agar tampak seperti tabung neon. Scene digabung dengan concat demuxer (stream copy), audio opsional di-mux.
+- **Bug yang ditemukan karena MELIHAT hasilnya, bukan dari test:** (a) `blend=screen` di YUV membuat seluruh latar jadi
+  magenta; harus di RGB (`format=gbrp`). (b) kata kapital panjang terpotong ("IMPLEMENTATIO/N"): estimasi lebar rata-rata
+  tidak cukup; kini per jenis huruf dan font disusutkan dulu. (c) landscape meluap ke bawah (ketemu oleh test): ukuran
+  huruf kini mengikuti sisi terpendek. Test biasa tidak melihat (a) dan (b); selalu ekstrak frame dan periksa.
+- **Uji end-to-end:** permintaan yang sama persis lewat kode bot + Claude asli menghasilkan MP4 73 detik, 17 scene,
+  dikirim sebagai video, 262 detik total, tanpa HTML.
+- **Batas:** hanya gaya neon; font DejaVu (tanpa emoji); tidak ada animasi gerak objek selain fade/slide teks.

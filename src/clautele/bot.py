@@ -365,11 +365,16 @@ class ClauteleBot:
     ) -> RunResult:
         state = self.store.get(chat_id)
         cfg = self.cfg
+        # clautele-video adalah alat bawaan kita (output dibatasi ke folder kerja), jadi diizinkan otomatis.
+        has_maker = bool(shutil.which("ffmpeg") and shutil.which("clautele-video"))
+        builtin_tools = ["Bash(clautele-video *)"] if has_maker and cfg.send_files else []
         parts = [cfg.append_system_prompt, SYSTEM_PROMPT]
         if cfg.send_files:
             parts.append(files_system_prompt(cfg.outbox_dir, cfg.inbox_dir, cfg.send_max_mb))
             if shutil.which("ffmpeg"):
-                parts.append(video_system_prompt(cfg.outbox_dir, cfg.inbox_dir, cfg.send_max_mb))
+                parts.append(
+                    video_system_prompt(cfg.outbox_dir, cfg.inbox_dir, cfg.send_max_mb, has_maker=has_maker)
+                )
         full_cfg_prompt = "\n\n".join(p for p in parts if p)
         cfg = replace(cfg, append_system_prompt=full_cfg_prompt)
         args = build_args(
@@ -377,7 +382,7 @@ class ClauteleBot:
             session_id=state.session_id,
             permission_mode=state.permission_mode,
             model=state.model,
-            extra_allowed_tools=state.granted_tools,
+            extra_allowed_tools=[*state.granted_tools, *builtin_tools],
         )
         run = ClaudeRun(cfg, args)
         self.runs[chat_id] = run

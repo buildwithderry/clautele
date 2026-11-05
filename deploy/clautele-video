@@ -1,0 +1,4 @@
+#!/bin/sh
+# Pembungkus clautele-video untuk mode host (dipasang ke ~/.local/bin oleh install-host.sh)
+REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+PYTHONPATH="$REPO/src" exec "$REPO/.venv/bin/python" -m clautele.videomaker "$@"
