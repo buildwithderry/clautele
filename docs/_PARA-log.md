@@ -7,3 +7,4 @@
 | 2026-11-05 | keamanan-operasional.md | (baru) | 2 Areas | Tanggung jawab berkelanjutan, tanpa tanggal selesai |
 | 2026-11-06 | keputusan-desain.md, checklist-proyek.md, keamanan-operasional.md | (revisi) | tetap di lokasi | Menambah keputusan tiga tingkat akses |
 | 2026-11-06 | keputusan-desain.md, checklist-proyek.md, keamanan-operasional.md | (revisi) | tetap di lokasi | Menambah keputusan 2FA TOTP |
+| 2026-11-06 | rilis-dan-versioning.md | (baru) | 2 Areas | Tanggung jawab berkelanjutan: aturan rilis dan tag |

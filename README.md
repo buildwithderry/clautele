@@ -101,6 +101,11 @@ docker build --target test .     # menjalankan seluruh test di dalam Docker
 
 Tanpa Docker: `pip install -r requirements-dev.txt && pytest` (butuh Python 3.11+).
 
+## Versi
+
+Memakai [Semantic Versioning](https://semver.org/lang/id/); riwayat perubahan di [CHANGELOG.md](CHANGELOG.md).
+Versi berjalan tampil di `/status`. Untuk memakai versi tertentu: `git checkout v0.2.0`.
+
 ## Dokumentasi
 
 Dikelola dengan PARA, lihat [docs/README.md](docs/README.md): arsitektur, keputusan desain, dan catatan referensi

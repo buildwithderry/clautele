@@ -21,7 +21,7 @@ WORKDIR /app
 FROM base AS test
 COPY requirements.txt requirements-dev.txt ./
 RUN pip install --no-cache-dir -r requirements-dev.txt
-COPY pyproject.toml ./
+COPY pyproject.toml CHANGELOG.md ./
 COPY src ./src
 COPY tests ./tests
 RUN python -m pytest -q
