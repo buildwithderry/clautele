@@ -7,6 +7,8 @@ import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .totp import TotpError, validate_secret
+
 VALID_MODES = ("plan", "acceptEdits", "auto", "dontAsk", "bypassPermissions")
 
 
@@ -77,6 +79,9 @@ class Config:
     timeout_seconds: int = 900
     stream_progress: bool = True
     show_tool_output: bool = False
+    totp_secret: str | None = None
+    totp_session_minutes: int = 60
+    sandboxed: bool = False  # True di image Docker (CLAUTELE_SANDBOX=docker)
     extra_args: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
@@ -114,6 +119,26 @@ class Config:
         except ValueError as exc:
             raise ConfigError("CLAUDE_TIMEOUT_SECONDS harus bilangan bulat.") from exc
 
+        # 2FA: wajib di luar sandbox Docker (mode host = akses penuh), opsional di Docker.
+        sandboxed = e.get("CLAUTELE_SANDBOX", "").strip().lower() == "docker"
+        totp_secret = e.get("TOTP_SECRET", "").strip() or None
+        if totp_secret:
+            try:
+                validate_secret(totp_secret)
+            except TotpError as exc:
+                raise ConfigError(str(exc)) from exc
+        elif not sandboxed:
+            raise ConfigError(
+                "Mode host (tanpa Docker) WAJIB memakai 2FA karena Claude punya akses penuh. "
+                "Buat secret dengan:  python -m clautele.totp   lalu isi TOTP_SECRET di .env."
+            )
+        try:
+            session_minutes = int(e.get("TOTP_SESSION_MINUTES", "60") or "60")
+        except ValueError as exc:
+            raise ConfigError("TOTP_SESSION_MINUTES harus bilangan bulat.") from exc
+        if not 1 <= session_minutes <= 1440:
+            raise ConfigError("TOTP_SESSION_MINUTES harus antara 1 dan 1440.")
+
         return cls(
             telegram_token=token,
             allowed_user_ids=allowed,
@@ -129,5 +154,8 @@ class Config:
             timeout_seconds=timeout,
             stream_progress=_bool(e.get("STREAM_PROGRESS"), True),
             show_tool_output=_bool(e.get("SHOW_TOOL_OUTPUT"), False),
+            totp_secret=totp_secret,
+            totp_session_minutes=session_minutes,
+            sandboxed=sandboxed,
             extra_args=tuple(shlex.split(e.get("CLAUDE_EXTRA_ARGS", ""))),
         )

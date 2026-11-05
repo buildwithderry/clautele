@@ -14,7 +14,9 @@
 ## Mode host (tingkat 3)
 - [ ] Hanya satu instance per token: hentikan container Docker sebelum service host (`getUpdates` 409 kalau bentrok)
 - [ ] `CLAUDE_PERMISSION_MODE=acceptEdits`; jangan `bypassPermissions`
-- [ ] Akun Telegram pemilik memakai verifikasi dua langkah (mengambil alih akun = shell di server)
+- [ ] `TOTP_SECRET` terisi, `.env` chmod 600, jam server sinkron (NTP)
+- [ ] Verifikasi dua langkah bawaan Telegram aktif (Settings → Privacy and Security)
+- [ ] Secret TOTP tidak pernah ditempel ke chat; jika terlanjur, buat baru dengan `python -m clautele.totp`
 - [ ] `journalctl --user -u clautele` tidak memuat token (diredam di `__main__.py`)
 
 ## Fakta yang perlu diingat

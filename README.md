@@ -6,7 +6,7 @@ Ngobrol dengan **Claude Code** yang berjalan di VPS Anda lewat **bot Telegram**.
 - Claude bertanya → pilih tombol **atau** ketik jawaban sendiri
 - Mulai/akhiri sesi kapan saja (`/start_claude`, `/end_claude`)
 - Tool yang ditolak bisa diizinkan dengan satu tombol
-- Aman secara default: hanya user ID yang Anda daftarkan
+- Aman secara default: hanya user ID yang Anda daftarkan, plus **2FA TOTP** (Google Authenticator, Aegis, Authy, dll.)
 
 > ⚠️ Bot ini memberi akses ke Claude Code, yang dapat membaca/menulis file dan menjalankan perintah di folder kerjanya.
 > Isi `ALLOWED_USER_IDS` dengan benar dan arahkan `WORKSPACE_DIR` ke folder khusus, bukan home Anda.
@@ -54,7 +54,7 @@ Seberapa banyak yang boleh disentuh Claude ditentukan oleh cara Anda menjalankan
 | 2. Folder tertentu | Docker + `WORKSPACE_DIR=/path/folder` di `.env` | Hanya folder itu |
 | 3. Penuh di host | `bash deploy/install-host.sh` (tanpa Docker) | Semua yang bisa dilakukan akun Linux Anda, termasuk `docker`, `git`, dan semua folder |
 
-**Tingkat 3 bukan sandbox.** Siapa pun yang lolos `ALLOWED_USER_IDS` (atau yang mengambil alih akun Telegram Anda)
+**Tingkat 3 bukan sandbox, dan 2FA TOTP wajib** (bot menolak start tanpa `TOTP_SECRET`). Siapa pun yang lolos `ALLOWED_USER_IDS` (atau yang mengambil alih akun Telegram Anda)
 praktis punya shell di server. Pakai hanya di server milik sendiri, biarkan `CLAUDE_PERMISSION_MODE=acceptEdits`
 dan jangan aktifkan `ALLOW_BYPASS_PERMISSIONS`. Mode host memakai login Claude yang sudah ada di akun itu
 (`~/.claude`), jadi `claude-config/` tidak dipakai.
@@ -62,6 +62,23 @@ dan jangan aktifkan `ALLOW_BYPASS_PERMISSIONS`. Mode host memakai login Claude y
 Skrip host memasang *systemd user service* (tanpa `sudo`), membaca `.env` dari folder repo, dan menolak jalan kalau
 container Docker `clautele` masih aktif (dua instance dengan token sama bentrok). Perintah berguna:
 `systemctl --user status clautele`, `journalctl --user -u clautele -f`, `systemctl --user disable --now clautele`.
+
+## 2FA (TOTP)
+
+Bot terkunci sampai Anda kirim `/login 123456` (kode 6 digit dari aplikasi authenticator). Sesi terbuka selama
+`TOTP_SESSION_MINUTES` (default 60), lalu terkunci lagi; `/logout` mengunci seketika, restart bot juga mengunci.
+Kode yang sudah dipakai ditolak, 5 kali salah mengunci 15 menit, dan pesan `/login` dihapus dari chat.
+
+Setup (di terminal pribadi, jangan di chat):
+```bash
+python -m clautele.totp                      # cetak TOTP_SECRET baru + URI otpauth
+# tambahkan TOTP_SECRET=... ke .env, masukkan kuncinya ke aplikasi authenticator, lalu uji:
+python -m clautele.totp --verify 123456
+```
+Di Docker: `docker compose run --rm clautele python -m clautele.totp`. Wajib di mode host, opsional di Docker.
+
+Ini melengkapi, bukan menggantikan, verifikasi dua langkah bawaan Telegram (Settings → Privacy and Security →
+Two-Step Verification), yang melindungi akun Telegram Anda dari pengambilalihan. Aktifkan keduanya.
 
 ## Izin & keamanan
 

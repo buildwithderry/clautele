@@ -2,7 +2,7 @@ import pytest
 
 from clautele.config import Config, ConfigError
 
-BASE = {"TELEGRAM_BOT_TOKEN": "123:abc", "ALLOWED_USER_IDS": "42, 99"}
+BASE = {"TELEGRAM_BOT_TOKEN": "123:abc", "ALLOWED_USER_IDS": "42, 99", "CLAUTELE_SANDBOX": "docker"}
 
 
 def test_minimal_ok():

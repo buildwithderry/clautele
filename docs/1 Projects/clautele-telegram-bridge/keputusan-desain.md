@@ -39,3 +39,16 @@ ingin mengelola server dari Telegram. Pemilik memilih tingkat 3 untuk VPS-nya se
 Mode host: venv di repo, `.env` dimuat aplikasi (`load_dotenv`; nilai berspasi seperti
 `CLAUDE_ALLOWED_TOOLS=Read Grep Glob` tidak aman di-`source` lewat bash), service `systemd --user`.
 Catatan operasional: Docker dan host memakai satu token bot, jadi hanya satu yang boleh jalan.
+
+## 7. 2FA TOTP di dalam bot
+Pemicu: di tingkat 3 akun Telegram yang diambil alih = shell di server. Allowlist user ID saja tidak cukup, karena
+ID melekat pada akun.
+- TOTP RFC 6238 ditulis sendiri dengan stdlib (hmac/struct), tanpa dependensi baru. Diverifikasi terhadap vektor uji
+  RFC (`287082`, `081804`, `279037`).
+- Status login hanya di memori: restart = terkunci. Sesi absolut (bukan sliding) agar masa berlaku pasti.
+- Anti replay (langkah waktu yang sama tak bisa dipakai dua kali), anti brute force (5 salah → kunci 15 menit),
+  pembanding waktu-konstan, pesan `/login` dihapus.
+- Wajib bila `CLAUTELE_SANDBOX` bukan `docker` (mode host); tidak ada opsi mematikannya. Di Docker opsional.
+- **Batas yang jujur:** 2FA melindungi dari pemakai akun Telegram yang dicuri, bukan dari penyerang yang sudah punya
+  akses ke server atau `.env` (secret ada di sana). Karena itu `.env` harus `chmod 600`.
+- Jam server harus akurat (NTP); toleransi hanya ±30 detik.

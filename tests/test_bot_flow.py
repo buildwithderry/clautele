@@ -2,6 +2,7 @@
 
 import json
 import stat
+import time
 import sys
 import textwrap
 from types import SimpleNamespace
@@ -34,13 +35,15 @@ class FakeBot:
         pass
 
 
-def make(tmp_path, script_body):
+def make(tmp_path, script_body, extra_env=None):
     script = tmp_path / "fake_claude.py"
     script.write_text(f"#!{sys.executable}\n" + textwrap.dedent(script_body))
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
     cfg = Config.from_env(
         {
             "TELEGRAM_BOT_TOKEN": "1:x",
+            "CLAUTELE_SANDBOX": "docker",
+            **(extra_env or {}),
             "ALLOWED_USER_IDS": "5",
             "CLAUDE_BIN": str(script),
             "CLAUDE_WORKDIR": str(tmp_path / "ws"),
@@ -115,6 +118,7 @@ class FakeUpdate:
         self.effective_user = SimpleNamespace(id=uid)
         self.effective_chat = SimpleNamespace(id=chat_id)
         self.replies = []
+        self.deleted = False
         outer = self
 
         class Msg:
@@ -125,6 +129,9 @@ class FakeUpdate:
 
             async def reply_markdown(self, t, **kw):
                 outer.replies.append(t)
+
+            async def delete(self):
+                outer.deleted = True
 
         self.effective_message = Msg()
 
@@ -155,3 +162,59 @@ async def test_start_end_session_lifecycle(tmp_path):
     await bot.cmd_end_claude(end, ctx)
     s = store.get(1)
     assert s.active is False and s.session_id is None
+
+
+# ---------- 2FA ----------
+
+from clautele.totp import code_at  # noqa: E402
+
+TOTP = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+
+
+def _now_code(offset=0):
+    return code_at(TOTP, int(time.time() // 30) + offset)
+
+
+class FakeUpdateArgs(FakeUpdate):
+    pass
+
+
+async def test_locked_until_login_then_unlocked(tmp_path):
+    bot, ctx, store = make(tmp_path, QUESTION_CLAUDE, {"TOTP_SECRET": TOTP})
+
+    locked = FakeUpdate(5)
+    await bot.cmd_start_claude(locked, ctx)
+    assert "Terkunci" in locked.replies[0] and not store.get(1).active
+
+    txt = FakeUpdate(5)
+    await bot.on_text(txt, ctx)
+    assert "Terkunci" in txt.replies[0] and ctx.bot.sent == []  # tidak ada proses Claude
+
+    ctx.args = ["000000"]
+    bad = FakeUpdate(5)
+    await bot.cmd_login(bad, ctx)
+    assert "❌" in ctx.bot.sent[-1].text
+
+    ctx.args = [_now_code()]
+    good = FakeUpdate(5)
+    await bot.cmd_login(good, ctx)
+    assert "🔓" in ctx.bot.sent[-1].text
+    assert good.deleted  # pesan berisi kode dihapus
+
+    ok = FakeUpdate(5)
+    await bot.cmd_start_claude(ok, ctx)
+    assert store.get(1).active is True
+
+    out = FakeUpdate(5)
+    await bot.cmd_logout(out, ctx)
+    again = FakeUpdate(5)
+    await bot.cmd_status(again, ctx)
+    assert "Terkunci" in again.replies[0]
+
+
+async def test_login_unlisted_user_still_denied(tmp_path):
+    bot, ctx, _ = make(tmp_path, QUESTION_CLAUDE, {"TOTP_SECRET": TOTP})
+    ctx.args = [_now_code()]
+    upd = FakeUpdate(999)
+    await bot.cmd_login(upd, ctx)
+    assert "tidak diizinkan" in upd.replies[0]

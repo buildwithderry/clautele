@@ -30,6 +30,7 @@ from .asks import SYSTEM_PROMPT, Question, button_label, extract_question
 from .config import VALID_MODES, Config
 from .runner import ClaudeRun, RunResult, assistant_blocks, build_args
 from .store import StateStore
+from .totp import TotpGate
 from .textutil import describe_tool_use, format_denials, split_message
 
 log = logging.getLogger("clautele")
@@ -46,7 +47,9 @@ HELP = (
     "/status: info sesi, mode, model, biaya\n"
     "/mode: ganti permission mode\n"
     "/model `<nama>`: ganti model (kosong = default)\n"
-    "/id: tampilkan Telegram user ID Anda\n\n"
+    "/id: tampilkan Telegram user ID Anda\n"
+    "/login `<kode>`: buka kunci dengan kode 2FA (jika 2FA aktif)\n"
+    "/logout: kunci kembali\n\n"
     "Setelah /start\\_claude, kirim pesan biasa sebagai prompt. Kalau Claude bertanya, "
     "pilih tombol *atau* ketik jawaban sendiri."
 )
@@ -57,21 +60,54 @@ class ClauteleBot:
         self.cfg = cfg
         self.store = store
         self.runs: dict[int, ClaudeRun] = {}
+        self.gate = TotpGate(cfg.totp_secret, session_seconds=cfg.totp_session_minutes * 60)
 
     # ---------- util ----------
 
-    def _allowed(self, update: Update) -> bool:
+    def _listed(self, update: Update) -> bool:
         user = update.effective_user
         return bool(user and user.id in self.cfg.allowed_user_ids)
+
+    def _allowed(self, update: Update) -> bool:
+        """Terdaftar di allowlist DAN (jika 2FA aktif) sesi sedang terbuka."""
+        return self._listed(update) and self.gate.is_unlocked(update.effective_user.id)
 
     async def _deny(self, update: Update) -> None:
         user = update.effective_user
         uid = user.id if user else "?"
+        if self._listed(update):
+            if update.effective_message:
+                await update.effective_message.reply_text(
+                    "🔒 Terkunci. Kirim /login <kode 6 digit dari aplikasi authenticator>."
+                )
+            return
         log.warning("Akses ditolak untuk user id %s", uid)
         if update.effective_message:
             await update.effective_message.reply_text(
                 f"⛔ Anda tidak diizinkan memakai bot ini. User ID Anda: {uid}"
             )
+
+    async def cmd_login(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._listed(update):
+            return await self._deny(update)
+        msg = update.effective_message
+        uid = update.effective_user.id
+        if not self.gate.required:
+            return await msg.reply_text("2FA tidak aktif (TOTP_SECRET kosong). Tidak perlu login.")
+        ok, info = self.gate.attempt(uid, " ".join(ctx.args))
+        # Hapus pesan berisi kode agar tidak tersisa di riwayat chat.
+        try:
+            await msg.delete()
+        except TelegramError:
+            pass
+        log.info("Login 2FA %s untuk user id %s", "berhasil" if ok else "gagal", uid)
+        await ctx.bot.send_message(update.effective_chat.id, ("🔓 " if ok else "❌ ") + info)
+
+    async def cmd_logout(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._listed(update):
+            return await self._deny(update)
+        self.gate.lock(update.effective_user.id)
+        await update.effective_message.reply_text("🔒 Terkunci. /login <kode> untuk membuka lagi.")
 
     # ---------- perintah ----------
 
@@ -149,6 +185,14 @@ class ClauteleBot:
             f"Giliran: {s.turns} | Biaya sesi: ${s.total_cost_usd:.4f}",
             f"Izin tambahan: {', '.join(s.granted_tools) or '-'}",
             f"Folder kerja: {self.cfg.workdir}",
+            "2FA: "
+            + (
+                "tidak aktif"
+                if not self.gate.required
+                else time.strftime(
+                    "terbuka sampai %H:%M", time.localtime(self.gate.unlocked_until(update.effective_user.id))
+                )
+            ),
         ]
         await update.effective_message.reply_text("\n".join(lines))
 
@@ -406,6 +450,8 @@ class ClauteleBot:
     def register(self, app: Application) -> None:
         app.add_handler(CommandHandler(["start", "help"], self.cmd_help))
         app.add_handler(CommandHandler("id", self.cmd_id))
+        app.add_handler(CommandHandler("login", self.cmd_login))
+        app.add_handler(CommandHandler("logout", self.cmd_logout))
         app.add_handler(CommandHandler("start_claude", self.cmd_start_claude))
         app.add_handler(CommandHandler("end_claude", self.cmd_end_claude))
         app.add_handler(CommandHandler("new", self.cmd_new))
@@ -420,6 +466,8 @@ class ClauteleBot:
     async def post_init(app: Application) -> None:
         await app.bot.set_my_commands(
             [
+                BotCommand("login", "Buka kunci dengan kode 2FA"),
+                BotCommand("logout", "Kunci kembali"),
                 BotCommand("start_claude", "Mulai sesi Claude"),
                 BotCommand("end_claude", "Akhiri sesi Claude"),
                 BotCommand("new", "Percakapan baru"),

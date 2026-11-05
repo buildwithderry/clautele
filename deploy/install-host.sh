@@ -35,8 +35,8 @@ if [ ! -f .env ]; then
   cp .env.example .env && chmod 600 .env
   die ".env dibuat dari .env.example. Isi TELEGRAM_BOT_TOKEN dan ALLOWED_USER_IDS, lalu jalankan ulang."
 fi
-for key in TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS; do
-  grep -Eq "^${key}=.+" .env || die "$key belum diisi di .env"
+for key in TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS TOTP_SECRET; do
+  grep -Eq "^${key}=.+" .env || die "$key belum diisi di .env$( [ "$key" = TOTP_SECRET ] && echo " (2FA WAJIB di mode host: jalankan di terminal pribadi  .venv/bin/python -m clautele.totp )")"
 done
 grep -Eq '^CLAUDE_WORKDIR=.+' .env || echo "Catatan: CLAUDE_WORKDIR kosong -> memakai ./workspace. Isi mis. CLAUDE_WORKDIR=$HOME/apps untuk akses lebih luas."
 

@@ -10,7 +10,7 @@ from clautele.config import Config
 from clautele.runner import ClaudeRun, build_args, child_env, parse_line
 from clautele.store import StateStore
 
-BASE = {"TELEGRAM_BOT_TOKEN": "123:abc", "ALLOWED_USER_IDS": "1"}
+BASE = {"TELEGRAM_BOT_TOKEN": "123:abc", "ALLOWED_USER_IDS": "1", "CLAUTELE_SANDBOX": "docker"}
 
 
 def make_cfg(tmp_path: Path, **extra):

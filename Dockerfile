@@ -36,7 +36,8 @@ COPY src ./src
 # bypassPermissions sebagai root, jadi jalankan sebagai non-root.
 RUN mkdir -p /workspace /data && chown -R node:node /workspace /data
 USER node
-ENV HOME=/home/node \
+ENV CLAUTELE_SANDBOX=docker \
+    HOME=/home/node \
     CLAUDE_WORKDIR=/workspace \
     DATA_DIR=/data
 
