@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -29,6 +30,7 @@ from telegram.ext import (
 from . import __version__
 from .asks import SYSTEM_PROMPT, Question, button_label, extract_question
 from .config import VALID_MODES, Config
+from .grants import options_for
 from .files import (
     MAX_FILES_PER_REPLY,
     FileRef,
@@ -37,6 +39,8 @@ from .files import (
     files_system_prompt,
     inbox_target,
     is_photo,
+    is_video,
+    video_system_prompt,
     resolve_sendable,
 )
 from .runner import ClaudeRun, RunResult, assistant_blocks, build_args
@@ -281,22 +285,23 @@ class ClauteleBot:
             await self.run_prompt(ctx, chat_id, choice)
 
         elif kind == "grant":
-            pending: list[str] = ctx.chat_data.get("pending_grants", [])
-            tools = pending if value == "all" else [t for t in pending if t == value]
-            if not tools:
+            pending: list[list[str]] = ctx.chat_data.get("pending_grants", [])
+            try:
+                rules = pending[int(value)]
+            except (ValueError, IndexError):
                 return await q.answer("Permintaan kedaluwarsa.", show_alert=True)
             if chat_id in self.runs:
                 return await q.answer("Claude masih bekerja.", show_alert=True)
-            state.granted_tools = list(dict.fromkeys([*state.granted_tools, *tools]))
+            state.granted_tools = list(dict.fromkeys([*state.granted_tools, *rules]))
             self.store.save()
             ctx.chat_data.pop("pending_grants", None)
             await q.answer("Diizinkan")
             await q.edit_message_reply_markup(reply_markup=None)
-            await ctx.bot.send_message(chat_id, f"✅ Diizinkan: {', '.join(tools)}")
+            await ctx.bot.send_message(chat_id, f"✅ Diizinkan: {', '.join(rules)}")
             await self.run_prompt(
                 ctx,
                 chat_id,
-                f"Izin untuk tool {', '.join(tools)} sudah diberikan. Silakan lanjutkan tugas tadi.",
+                f"Izin untuk {', '.join(rules)} sudah diberikan. Silakan lanjutkan tugas tadi.",
             )
 
         elif kind == "dismiss":
@@ -363,6 +368,8 @@ class ClauteleBot:
         parts = [cfg.append_system_prompt, SYSTEM_PROMPT]
         if cfg.send_files:
             parts.append(files_system_prompt(cfg.outbox_dir, cfg.inbox_dir, cfg.send_max_mb))
+            if shutil.which("ffmpeg"):
+                parts.append(video_system_prompt(cfg.outbox_dir, cfg.inbox_dir, cfg.send_max_mb))
         full_cfg_prompt = "\n\n".join(p for p in parts if p)
         cfg = replace(cfg, append_system_prompt=full_cfg_prompt)
         args = build_args(
@@ -418,13 +425,7 @@ class ClauteleBot:
         chunks = split_message(body) if body else []
 
         denial_note = format_denials(result.permission_denials)
-        denied_tools = sorted(
-            {
-                str(d.get("tool_name"))
-                for d in result.permission_denials
-                if isinstance(d, dict) and d.get("tool_name")
-            }
-        )
+        grant_options = options_for(result.permission_denials)
 
         for chunk in chunks:
             await ctx.bot.send_message(chat_id, chunk)
@@ -440,16 +441,16 @@ class ClauteleBot:
             )
 
         if denial_note:
-            ctx.chat_data["pending_grants"] = denied_tools
+            ctx.chat_data["pending_grants"] = [list(o.rules) for o in grant_options]
             rows = [
-                [InlineKeyboardButton(f"✅ Izinkan {t}", callback_data=f"grant:{t}"[:64])]
-                for t in denied_tools[:4]
+                [InlineKeyboardButton(o.label[:60], callback_data=f"grant:{i}")]
+                for i, o in enumerate(grant_options)
             ]
-            if len(denied_tools) > 1:
-                rows.append([InlineKeyboardButton("✅ Izinkan semua", callback_data="grant:all")])
             rows.append([InlineKeyboardButton("Abaikan", callback_data="dismiss:")])
             await ctx.bot.send_message(
-                chat_id, denial_note, reply_markup=InlineKeyboardMarkup(rows) if denied_tools else None
+                chat_id,
+                denial_note,
+                reply_markup=InlineKeyboardMarkup(rows) if grant_options else None,
             )
 
     async def _send_files(self, ctx: ContextTypes.DEFAULT_TYPE, chat_id: int, refs: list[FileRef]) -> None:
@@ -471,13 +472,7 @@ class ClauteleBot:
                 await ctx.bot.send_message(chat_id, f"⚠️ Tidak mengirim {Path(ref.path).name}: {exc}")
                 continue
             try:
-                with path.open("rb") as fh:
-                    if is_photo(path):
-                        await ctx.bot.send_photo(chat_id, fh, caption=ref.caption or None)
-                    else:
-                        await ctx.bot.send_document(
-                            chat_id, fh, filename=path.name, caption=ref.caption or None
-                        )
+                await self._send_one(ctx, chat_id, path, ref.caption or None)
             except TelegramError as exc:
                 log.warning("Telegram gagal menerima %s: %s", path.name, exc)
                 await ctx.bot.send_message(chat_id, f"⚠️ Gagal mengirim {path.name}: {exc}")
@@ -485,6 +480,26 @@ class ClauteleBot:
             await ctx.bot.send_message(
                 chat_id, f"ℹ️ {len(refs) - MAX_FILES_PER_REPLY} file lagi tidak dikirim (maks {MAX_FILES_PER_REPLY} per balasan)."
             )
+
+    @staticmethod
+    async def _send_one(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int, path: Path, caption: str | None) -> None:
+        """Foto/video dikirim sebagai media; bila Telegram menolak formatnya, kirim sebagai dokumen."""
+        with path.open("rb") as fh:
+            try:
+                if is_photo(path):
+                    await ctx.bot.send_photo(chat_id, fh, caption=caption)
+                    return
+                if is_video(path):
+                    await ctx.bot.send_video(
+                        chat_id, fh, caption=caption, supports_streaming=True, filename=path.name
+                    )
+                    return
+            except TelegramError as exc:
+                if not (is_photo(path) or is_video(path)):
+                    raise
+                log.info("Kirim sebagai media gagal (%s), mencoba sebagai dokumen", exc)
+                fh.seek(0)
+            await ctx.bot.send_document(chat_id, fh, filename=path.name, caption=caption)
 
     # ---------- file masuk dari user ----------
 

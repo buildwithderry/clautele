@@ -19,11 +19,16 @@
 - [ ] Secret TOTP tidak pernah ditempel ke chat; jika terlanjur, buat baru dengan `python -m clautele.totp`
 - [ ] `journalctl --user -u clautele` tidak memuat token (diredam di `__main__.py`)
 
+## Izin
+- [ ] Tinjau `/status` → "Izin tambahan"; `/end_claude` menghapusnya
+- [ ] Jangan menaruh executable berbahaya (python, bash, curl) di `CLAUDE_ALLOWED_TOOLS` permanen
+
 ## File keluar
 - [ ] `SEND_ROOTS` kosong atau sempit; jangan menunjuk ke folder berisi file konfigurasi proyek lain
 - [ ] `ls <workdir>/.clautele/outbox` sesekali: bersihkan file lama
 - [ ] `SEND_FILES=false` bila bot dipakai di lingkungan yang tidak mengizinkan data keluar
 
 ## Fakta yang perlu diingat
-- Izin "Bash" yang diberikan lewat tombol berlaku untuk **semua** perintah Bash sampai `/end_claude`.
+- Tombol izin mengusulkan aturan per perintah (`Bash(ffmpeg *)`). Hanya pilihan bertanda ⚠️ "SEMUA Bash" yang membuka seluruh Bash sampai `/end_claude`.
+- Aturan sempit untuk `python`, `bash`, `curl`, `git`, `sudo`, dll. praktis setara akses penuh; label ⚠️ mengingatkan hal itu.
 - Claude di container hanya melihat `/workspace`, tetapi punya akses jaringan keluar.

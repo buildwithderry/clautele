@@ -5,6 +5,7 @@ Ngobrol dengan **Claude Code** yang berjalan di VPS Anda lewat **bot Telegram**.
 - Lihat proses CLI langsung di Telegram (tool yang dipakai, jawaban, biaya)
 - Claude bertanya → pilih tombol **atau** ketik jawaban sendiri
 - Kirim foto/dokumen ke Claude, dan Claude bisa mengirim file hasil kerjanya ke chat
+- Buat dan edit video (ffmpeg), hasilnya terkirim sebagai video yang bisa langsung diputar
 - Mulai/akhiri sesi kapan saja (`/start_claude`, `/end_claude`)
 - Tool yang ditolak bisa diizinkan dengan satu tombol
 - Aman secara default: hanya user ID yang Anda daftarkan, plus **2FA TOTP** (Google Authenticator, Aegis, Authy, dll.)
@@ -57,6 +58,19 @@ Ngobrol dengan **Claude Code** yang berjalan di VPS Anda lewat **bot Telegram**.
   bernama biasa (mis. `docker-compose.yml` berisi password), jadi jangan melebarkan `SEND_ROOTS` ke folder seperti itu.
   Matikan semuanya dengan `SEND_FILES=false`.
 
+## Video
+
+Image Docker menyertakan `ffmpeg` dan `ffprobe`. Contoh permintaan: *"buat video 5 detik latar biru dengan tulisan Halo"*,
+atau kirim video dengan keterangan *"potong menit 0:10–0:25 lalu kecilkan jadi 720p"*.
+
+- Hasil dikirim sebagai MP4 yang bisa diputar langsung (maks 50 MB; Claude diminta menjaga di bawah ±45 MB).
+- Video dari Anda maksimal 20 MB (batas Bot API Telegram). Claude **tidak bisa menonton atau mendengar** video: ia
+  mengambil beberapa frame lewat ffmpeg dan membacanya sebagai gambar.
+- Server kecil (2 CPU) akan lambat untuk video panjang/resolusi tinggi; ada batas waktu `CLAUDE_TIMEOUT_SECONDS`.
+- Tombol izin mengusulkan `Bash(ffmpeg *)`, jadi Anda tidak perlu memberi izin ke seluruh Bash.
+- Image jadi sekitar 0,6 GB lebih besar. Tanpa video: `docker compose build --build-arg WITH_FFMPEG=false`.
+- Mode host: pasang sendiri (`sudo apt install ffmpeg fonts-dejavu-core`); panduan video baru aktif jika `ffmpeg` ada di PATH.
+
 ## Pilih tingkat akses
 
 Seberapa banyak yang boleh disentuh Claude ditentukan oleh cara Anda menjalankan bot.
@@ -96,7 +110,8 @@ Two-Step Verification), yang melindungi akun Telegram Anda dari pengambilalihan.
 ## Izin & keamanan
 
 Bot berjalan tanpa terminal, jadi permintaan izin Claude **ditolak otomatis** lalu ditawarkan sebagai tombol
-"Izinkan". Izin berlaku per nama tool (mis. semua `Bash`) sampai `/end_claude`. Untuk mengizinkan tool tertentu secara
+"Izinkan". Untuk Bash, tombol mengusulkan izin **per perintah** (mis. `Bash(ffmpeg *)`); pilihan "SEMUA Bash" selalu
+terakhir dan bertanda ⚠️. Izin berlaku sampai `/end_claude`. Untuk mengizinkan tool tertentu secara
 permanen, isi `CLAUDE_ALLOWED_TOOLS`, misalnya `Read Grep Glob "Bash(git status*)"`.
 
 `bypassPermissions` mematikan semua pengecekan; hanya aktif jika `ALLOW_BYPASS_PERMISSIONS=true`. Token bot tidak

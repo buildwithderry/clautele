@@ -37,6 +37,13 @@ class FakeBot:
     async def send_photo(self, chat_id, fh, caption=None, **kw):
         self.sent.append(SimpleNamespace(kind="photo", data=fh.read(), caption=caption, text=f"[foto] {caption}", reply_markup=None))
 
+    async def send_video(self, chat_id, fh, caption=None, supports_streaming=None, filename=None, **kw):
+        if getattr(self, "fail_video", False):
+            from telegram.error import BadRequest
+
+            raise BadRequest("Wrong file type")
+        self.sent.append(SimpleNamespace(kind="video", data=fh.read(), caption=caption, streaming=supports_streaming, text=f"[video] {filename}", reply_markup=None))
+
     async def send_document(self, chat_id, fh, filename=None, caption=None, **kw):
         self.sent.append(SimpleNamespace(kind="doc", data=fh.read(), filename=filename, caption=caption, text=f"[dokumen] {filename}", reply_markup=None))
 
@@ -99,8 +106,8 @@ async def test_permission_denial_offers_grant(tmp_path):
     await bot.run_prompt(ctx, 1, "jalankan sesuatu")
     grant = [m for m in ctx.bot.sent if m.reply_markup and "Ditolak" in m.text][-1]
     data = [b.callback_data for row in grant.reply_markup.inline_keyboard for b in row]
-    assert "grant:Bash" in data
-    assert ctx.chat_data["pending_grants"] == ["Bash"]
+    assert "grant:0" in data
+    assert ctx.chat_data["pending_grants"] == [["Bash"]]  # tanpa detail perintah: hanya opsi lebar
 
 
 async def test_busy_chat_rejects_second_prompt(tmp_path):
@@ -375,3 +382,103 @@ async def test_album_batched_into_single_prompt(tmp_path, monkeypatch):
     finals = [m.text for m in ctx.bot.sent if m.text.startswith("PROMPT:")]
     assert len(finals) == 1  # satu giliran untuk seluruh album
     assert finals[0].count("(foto)") == 3 and "bandingkan" in finals[0]
+
+
+# ---------- video & izin granular ----------
+
+VIDEO_CLAUDE = """
+import json, sys, os
+sys.stdin.read()
+os.makedirs(".clautele/outbox", exist_ok=True)
+open(".clautele/outbox/klip.mp4", "wb").write(b"MP4DATA")
+txt = 'Ini videonya.\\n<<FILE>>{"path": ".clautele/outbox/klip.mp4", "caption": "Klip"}<<END>>'
+print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": "V1", "result": txt}), flush=True)
+"""
+
+
+async def test_video_sent_as_streaming_video(tmp_path):
+    bot, ctx, _ = make(tmp_path, VIDEO_CLAUDE)
+    await bot.run_prompt(ctx, 1, "buat video")
+    vids = [m for m in ctx.bot.sent if getattr(m, "kind", "") == "video"]
+    assert len(vids) == 1 and vids[0].data == b"MP4DATA" and vids[0].streaming is True and vids[0].caption == "Klip"
+    assert not any(getattr(m, "kind", "") == "doc" for m in ctx.bot.sent)
+
+
+async def test_video_falls_back_to_document_when_telegram_rejects(tmp_path):
+    bot, ctx, _ = make(tmp_path, VIDEO_CLAUDE)
+    ctx.bot.fail_video = True
+    await bot.run_prompt(ctx, 1, "buat video")
+    docs = [m for m in ctx.bot.sent if getattr(m, "kind", "") == "doc"]
+    assert len(docs) == 1 and docs[0].filename == "klip.mp4" and docs[0].data == b"MP4DATA"  # isi utuh setelah seek(0)
+
+
+ARGV_CLAUDE = """
+import json, sys
+sys.stdin.read()
+sp = sys.argv[sys.argv.index("--append-system-prompt") + 1]
+print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": "A1", "result": "SP:" + sp}), flush=True)
+"""
+
+
+async def test_ffmpeg_guidance_only_when_installed(tmp_path, monkeypatch):
+    bot, ctx, _ = make(tmp_path, ARGV_CLAUDE)
+    monkeypatch.setattr("clautele.bot.shutil.which", lambda name: "/usr/bin/ffmpeg")
+    await bot.run_prompt(ctx, 1, "x")
+    assert "ffmpeg dan ffprobe tersedia" in " ".join(m.text for m in ctx.bot.sent)
+
+    (tmp_path / "b").mkdir()
+    bot2, ctx2, _ = make(tmp_path / "b", ARGV_CLAUDE)
+    monkeypatch.setattr("clautele.bot.shutil.which", lambda name: None)
+    await bot2.run_prompt(ctx2, 1, "x")
+    texts = " ".join(m.text for m in ctx2.bot.sent)
+    assert "SP:" in texts and "ffmpeg dan ffprobe tersedia" not in texts
+
+
+FFMPEG_DENIAL_CLAUDE = """
+import json, sys
+sys.stdin.read()
+print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": "G1",
+    "result": "Butuh izin.", "permission_denials": [
+      {"tool_name": "Bash", "tool_input": {"command": "ffmpeg -i in.mp4 out.mp4; ffprobe out.mp4"}}]}), flush=True)
+"""
+
+
+class FakeQuery:
+    def __init__(self, data, chat_id=1):
+        self.data, self.message = data, SimpleNamespace(chat_id=chat_id)
+        self.answers, self.cleared = [], False
+
+    async def answer(self, text=None, show_alert=False):
+        self.answers.append(text)
+
+    async def edit_message_reply_markup(self, reply_markup=None):
+        self.cleared = True
+
+
+async def test_granular_grant_button_flow(tmp_path):
+    bot, ctx, store = make(tmp_path, FFMPEG_DENIAL_CLAUDE)
+    await bot.run_prompt(ctx, 1, "kecilkan video")
+
+    msg = [m for m in ctx.bot.sent if m.reply_markup and "Ditolak" in m.text][-1]
+    labels = [b.text for row in msg.reply_markup.inline_keyboard for b in row]
+    assert any("ffmpeg, ffprobe" in l and l.startswith("✅") for l in labels)
+    assert any("SEMUA" in l for l in labels)
+    assert ctx.chat_data["pending_grants"][0] == ["Bash(ffmpeg *)", "Bash(ffprobe *)"]
+
+    q = FakeQuery("grant:0")
+    upd = SimpleNamespace(callback_query=q, effective_user=SimpleNamespace(id=5), effective_chat=SimpleNamespace(id=1))
+    await bot.on_callback(upd, ctx)
+    assert store.get(1).granted_tools == ["Bash(ffmpeg *)", "Bash(ffprobe *)"]  # bukan seluruh Bash
+    assert q.cleared  # tombol dibersihkan; fake claude menolak lagi sehingga pending_grants terisi ulang
+
+
+async def test_stale_or_foreign_grant_callbacks_rejected(tmp_path):
+    bot, ctx, store = make(tmp_path, FFMPEG_DENIAL_CLAUDE)
+    stale = FakeQuery("grant:0")
+    await bot.on_callback(SimpleNamespace(callback_query=stale, effective_user=SimpleNamespace(id=5), effective_chat=SimpleNamespace(id=1)), ctx)
+    assert store.get(1).granted_tools == [] and stale.answers == ["Permintaan kedaluwarsa."]
+
+    ctx.chat_data["pending_grants"] = [["Bash"]]
+    stranger = FakeQuery("grant:0")
+    await bot.on_callback(SimpleNamespace(callback_query=stranger, effective_user=SimpleNamespace(id=999), effective_chat=SimpleNamespace(id=1)), ctx)
+    assert store.get(1).granted_tools == []  # user di luar allowlist tidak bisa memberi izin

@@ -20,6 +20,7 @@ from pathlib import Path
 
 FILE_RE = re.compile(r"<<FILE>>(.*?)<<END>>", re.DOTALL)
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+VIDEO_EXTS = {".mp4", ".mov", ".m4v"}  # yang bisa diputar langsung di Telegram
 PHOTO_MAX_BYTES = 10 * 1024 * 1024  # batas Telegram untuk send_photo
 MAX_FILES_PER_REPLY = 5
 
@@ -120,6 +121,30 @@ def resolve_sendable(
 
 def is_photo(path: Path) -> bool:
     return path.suffix.lower() in IMAGE_EXTS and path.stat().st_size <= PHOTO_MAX_BYTES
+
+
+def is_video(path: Path) -> bool:
+    return path.suffix.lower() in VIDEO_EXTS
+
+
+def video_system_prompt(outbox: Path, inbox: Path, max_mb: int) -> str:
+    """Panduan memakai ffmpeg; hanya diberikan bila ffmpeg benar-benar terpasang."""
+    target = max(1, max_mb - 5)
+    return (
+        "ffmpeg dan ffprobe tersedia lewat Bash. "
+        f"MEMBUAT/MENGEDIT video untuk user: simpan hasil di {outbox} sebagai MP4 agar bisa diputar langsung di "
+        "Telegram: `-c:v libx264 -pix_fmt yuv420p -c:a aac -movflags +faststart` (tanpa audio: `-an`). "
+        f"Ukuran akhir harus di bawah {target} MB; jika lebih, turunkan resolusi (`-vf scale=-2:720`) atau naikkan "
+        "`-crf` (24-30). Server hanya punya 2 CPU: pakai `-preset veryfast`, dan batasi durasi/resolusi untuk "
+        "pekerjaan besar. Umum: potong `-ss MULAI -to AKHIR -i in.mp4`, gabung dengan concat demuxer, "
+        "kecilkan `-vf scale`, ambil audio `-vn`, GIF, slideshow dari gambar (`-loop 1 -t DETIK -i gambar.png`), "
+        "teks di video `drawtext` dengan fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf. "
+        f"MELIHAT video dari user (di {inbox}): kamu tidak bisa menonton atau mendengarnya. Cek metadata dengan "
+        "`ffprobe -v error -show_format -show_streams`, lalu ambil beberapa frame "
+        "(`ffmpeg -i in.mp4 -vf fps=1/5 -frames:v 12 frame_%02d.jpg`) dan baca gambarnya dengan Read; "
+        "jelaskan ke user bahwa kamu hanya melihat cuplikan gambar, bukan suaranya. "
+        "Simpan hasil sementara di folder kerja, jangan menimpa file asli user, dan beri nama hasil yang jelas."
+    )
 
 
 def safe_filename(name: str | None, fallback: str = "file") -> str:

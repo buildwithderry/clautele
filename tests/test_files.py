@@ -4,6 +4,8 @@ import pytest
 
 from clautele.files import (
     SendError,
+    is_video,
+    video_system_prompt,
     extract_files,
     inbox_target,
     is_photo,
@@ -134,3 +136,14 @@ def test_inbox_target_unique(tmp_path):
     a.write_text("1")
     b = inbox_target(tmp_path / "in", "x.jpg", fallback="foto", now=1_700_000_000)
     assert a != b and b.parent == a.parent
+
+
+def test_is_video(ws):
+    for n, expected in [("a.mp4", True), ("a.MOV", True), ("a.m4v", True), ("a.mkv", False), ("a.png", False)]:
+        assert is_video(ws / n) is expected, n
+
+
+def test_video_prompt_content(ws):
+    text = video_system_prompt(ws / "out", ws / "in", 50)
+    for needle in ("libx264", "yuv420p", "faststart", "ffprobe", "45 MB", str(ws / "out"), str(ws / "in"), "Read"):
+        assert needle in text, needle

@@ -6,6 +6,29 @@ bisa terjadi di versi minor dan akan ditandai **BREAKING**.
 
 ## [Belum dirilis]
 
+## [0.4.0] - 2026-11-06
+
+### Ditambahkan
+- **Video:** file `.mp4`/`.mov`/`.m4v` dikirim sebagai video yang bisa diputar langsung (streaming); jika Telegram
+  menolak formatnya, otomatis dikirim sebagai dokumen. Foto juga punya fallback yang sama.
+- **ffmpeg + ffprobe + font di image Docker** untuk membuat dan mengedit video (potong, gabung, kompres, teks,
+  slideshow, GIF, ambil audio). Mati dengan `--build-arg WITH_FFMPEG=false`.
+- Panduan video untuk Claude (format Telegram-friendly, batas ukuran, cara "melihat" video lewat frame) yang
+  hanya diberikan bila `ffmpeg` terpasang.
+- **Izin per perintah:** tombol penolakan izin kini mengusulkan `Bash(ffmpeg *)` (bukan seluruh Bash). Perintah
+  berantai diusulkan per bagian (`ffmpeg ...; ffprobe ...` → dua aturan). Executable yang setara menjalankan
+  kode bebas (python, bash, sudo, curl, git, ...) ditandai ⚠️.
+
+### Berubah
+- **BREAKING (kecil):** callback tombol izin memakai indeks (`grant:0`), bukan nama tool; tombol lama di chat yang
+  sudah terkirim menjadi "kedaluwarsa". Tombol "Izinkan semua" dihapus.
+- Image Docker membesar sekitar 0,6 GB (1,07 → 1,7 GB) karena ffmpeg.
+
+### Catatan
+- Claude tidak bisa menonton/mendengar video; ia hanya melihat frame yang diambil lewat ffmpeg. Transkripsi suara
+  belum ada.
+- Video dari user dibatasi 20 MB oleh Bot API Telegram.
+
 ## [0.3.0] - 2026-11-06
 
 ### Ditambahkan
@@ -46,7 +69,8 @@ bisa terjadi di versi minor dan akan ditandai **BREAKING**.
 - Docker multi-stage (test + runtime non-root), `docker-compose.yml`, `.env.example`.
 - Dokumentasi PARA di `docs/`.
 
-[Belum dirilis]: https://github.com/buildwithderry/clautele/compare/v0.3.0...HEAD
+[Belum dirilis]: https://github.com/buildwithderry/clautele/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/buildwithderry/clautele/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/buildwithderry/clautele/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/buildwithderry/clautele/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/buildwithderry/clautele/releases/tag/v0.1.0

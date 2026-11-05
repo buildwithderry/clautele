@@ -30,6 +30,8 @@ if [ ! -x .venv/bin/python ]; then
 fi
 .venv/bin/python -m pip install --quiet -r requirements.txt
 
+command -v ffmpeg >/dev/null || echo "Catatan: ffmpeg tidak ditemukan; fitur video nonaktif. Opsional: sudo apt install ffmpeg fonts-dejavu-core"
+
 say "Memeriksa .env"
 if [ ! -f .env ]; then
   cp .env.example .env && chmod 600 .env

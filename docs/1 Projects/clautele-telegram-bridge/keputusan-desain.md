@@ -68,3 +68,24 @@ karena bot hanya meneruskan teks. Perbaikan:
   masih bisa menyalin isi rahasia ke `outbox/` dengan nama lain. Mitigasinya ada di izin tool (Bash tidak diizinkan
   permanen) dan 2FA, bukan di filter ini.
 - Suara/audio/video disimpan tetapi tidak ditranskripsi (belum ada tool untuk itu).
+
+## 9. Video, izin per perintah (v0.4.0)
+Kebutuhan: user minta video (kirim, buat, edit). Telegram menerima file apa pun sebagai dokumen, tetapi video harus dikirim
+dengan `send_video(supports_streaming=True)` agar bisa diputar; MP4 H.264 + AAC paling aman, dengan fallback ke dokumen.
+- **ffmpeg, bukan Remotion.** ffmpeg menutup kebutuhan: potong, gabung, kompres, teks, slideshow, GIF, ambil audio, dan
+  "melihat" video lewat frame. Remotion (video dari kode React) butuh Chromium + Node di image, ratusan MB tambahan, dan
+  memiliki lisensi khusus (setahu saya gratis untuk individu/tim kecil, berbayar untuk perusahaan lebih besar; cek
+  remotion.dev/license). Tidak cocok jadi bawaan repo yang dibagikan. Opsi nanti: varian image terpisah.
+- **Whisper ditunda ke v0.5.0.** Berguna untuk transkripsi pesan suara dan subtitle otomatis. Rencana: `faster-whisper`
+  (CTranslate2, tanpa PyTorch) model `small`/`base` int8, opsional lewat build arg agar image default tidak membengkak.
+  VPS pemilik: 2 CPU, 7,6 GB RAM, jadi `small` jalan tetapi lambat; model diunduh saat pertama dipakai.
+- **Verifikasi izin dengan Claude asli (2.1.318):** `Bash(ffmpeg *)` hanya mengizinkan ffmpeg; perintah berantai
+  (`;`, `&&`) diperiksa per bagian, jadi `echo x; ffmpeg ...` dengan aturan echo saja ditolak. Maka tombol izin
+  mengusulkan satu aturan per executable dan menandai executable yang setara kode bebas (python, bash, curl, git, ...).
+  Substitusi perintah `$(...)`, backtick, banyak baris, dan `VAR=x cmd` tidak diusulkan sebagai aturan sempit.
+  Jebakan saat menguji: `date`, `sleep`, dan `python3 --version` otomatis diizinkan di mode acceptEdits, sehingga
+  tes yang memakai perintah itu menghasilkan kesimpulan keliru. Pakai perintah yang pasti butuh izin (mis. `ffmpeg`).
+- Uji end-to-end: Claude asli (sonnet) membuat MP4 H.264 1280x720 3 detik dari satu permintaan, hanya dengan izin
+  ffmpeg/ffprobe, dan penanda `<<FILE>>` lolos validasi.
+- **Biaya:** image 1,07 GB → 1,7 GB (ffmpeg Debian membawa banyak dependensi). Alternatif lebih kecil: binary ffmpeg statis
+  (mengunduh dari luar, perlu verifikasi checksum), belum dipilih.
