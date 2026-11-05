@@ -24,4 +24,4 @@
 | Tag | Commit | Isi |
 |---|---|---|
 | v0.1.0 | 53f75b5 | Bot Telegram + Docker + dokumentasi PARA |
-| v0.2.0 | (lihat `git show v0.2.0`) | Mode host + 2FA TOTP |
+| v0.2.0 | 64daa7c | Mode host + 2FA TOTP |
