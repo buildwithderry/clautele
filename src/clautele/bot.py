@@ -47,6 +47,7 @@ from .files import (
 from .runner import ClaudeRun, RunResult, assistant_blocks, build_args
 from .store import StateStore
 from .totp import TotpGate
+from .tts import health as tts_health
 from .textutil import describe_tool_use, format_denials, split_message
 
 log = logging.getLogger("clautele")
@@ -212,6 +213,14 @@ class ClauteleBot:
                 )
             ),
         ]
+        if self.cfg.tts is None:
+            lines.append("Suara (TTS): belum dikonfigurasi")
+        else:
+            ok, detail = await asyncio.to_thread(tts_health, self.cfg.tts)
+            lines.append(
+                f"Suara (TTS {self.cfg.tts.host}, suara '{self.cfg.tts.voice}'): "
+                + ("terhubung" if ok else f"TIDAK terjangkau ({detail})")
+            )
         await update.effective_message.reply_text("\n".join(lines))
 
     async def cmd_mode(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -392,7 +401,9 @@ class ClauteleBot:
             parts.append(files_system_prompt(cfg.outbox_dir, cfg.inbox_dir, cfg.send_max_mb))
             if shutil.which("ffmpeg"):
                 parts.append(
-                    video_system_prompt(cfg.outbox_dir, cfg.inbox_dir, cfg.send_max_mb, has_maker=has_maker)
+                    video_system_prompt(
+                        cfg.outbox_dir, cfg.inbox_dir, cfg.send_max_mb, has_maker=has_maker, has_tts=cfg.tts is not None
+                    )
                 )
         return "\n\n".join(p for p in parts if p), builtin_tools
 

@@ -127,7 +127,7 @@ def is_video(path: Path) -> bool:
     return path.suffix.lower() in VIDEO_EXTS
 
 
-def video_system_prompt(outbox: Path, inbox: Path, max_mb: int, has_maker: bool = False) -> str:
+def video_system_prompt(outbox: Path, inbox: Path, max_mb: int, has_maker: bool = False, has_tts: bool = False) -> str:
     """Panduan video untuk Claude; hanya diberikan bila ffmpeg benar-benar terpasang."""
     target = max(1, max_mb - 5)
     rule = (
@@ -155,9 +155,19 @@ def video_system_prompt(outbox: Path, inbox: Path, max_mb: int, has_maker: bool 
         if has_maker
         else ""
     )
+    voice = (
+        'SUARA/NARASI: spec mendukung "narration":"teks yang dibacakan" per scene (maks 500 karakter) memakai suara '
+        "milik user lewat TTS. Pakai hanya bila user meminta suara, narasi, atau voice over. Tulis seperti diucapkan "
+        "(angka dieja, singkatan dijelaskan, kalimat pendek), 1-3 kalimat per scene. Durasi scene otomatis menyesuaikan "
+        "panjang suara. Jika TTS gagal (mis. komputer user mati), sampaikan apa adanya dan tawarkan video tanpa suara; "
+        "jangan berpura-pura sudah ada suara. "
+        if has_maker and has_tts
+        else ""
+    )
     return (
         rule
         + maker
+        + voice
         + "ffmpeg dan ffprobe tersedia lewat Bash. "
         f"MEMBUAT/MENGEDIT video untuk user: simpan hasil di {outbox} sebagai MP4 agar bisa diputar langsung di "
         "Telegram: `-c:v libx264 -pix_fmt yuv420p -c:a aac -movflags +faststart` (tanpa audio: `-an`). "

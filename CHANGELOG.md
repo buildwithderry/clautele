@@ -6,6 +6,31 @@ bisa terjadi di versi minor dan akan ditandai **BREAKING**.
 
 ## [Belum dirilis]
 
+> Belum divalidasi terhadap VoiceStudio yang sebenarnya (hanya server tiruan); tag versi menunggu uji nyata.
+
+### Ditambahkan
+- **Narasi suara (TTS)** lewat endpoint kompatibel OpenAI (`POST /v1/audio/speech`), mis. VoiceStudio di komputer
+  lain. Klien stdlib `clautele.tts`: HTTPS wajib (kecuali loopback), redirect ditolak agar kredensial tidak ikut ke
+  host lain, respons dibatasi ukuran dan harus benar-benar audio, kredensial tidak masuk ke pesan error atau
+  `repr`. Variabel `TTS_BASE_URL`, `TTS_BASIC_AUTH` / `TTS_API_KEY`, `TTS_EXTRA_HEADERS`, `TTS_VOICE`, `TTS_MODEL`,
+  `TTS_FORMAT`, `TTS_LANGUAGE`, `TTS_TIMEOUT`.
+- `python -m clautele.tts --probe`: diagnosis (health, engine, path API terkait suara, uji sintesis) tanpa
+  mencetak kredensial.
+- Kolom `narration` per scene di `clautele-video`: semua narasi disintesis lebih dulu (gagal cepat sebelum render),
+  durasi scene menyesuaikan panjang suara, scene tanpa narasi mendapat audio hening agar segmen seragam.
+- `/status` menampilkan apakah TTS terjangkau.
+
+### Diperbaiki
+- Musik latar yang lebih pendek dari video **memotong video**; kini diulang (`-stream_loop`). Dengan narasi, musik
+  dikecilkan di bawah suara.
+- Pembaca `.env` bawaan memakai nilai pertama untuk kunci duplikat, sedangkan docker compose memakai yang terakhir;
+  kini sama (yang terakhir menang).
+
+### Catatan keamanan
+- `CLAUDE_ALLOWED_TOOLS=*` **tidak** membuka semua izin (diuji: `ffmpeg` tetap ditolak); gunakan pola seperti
+  `Bash(ffmpeg *)`.
+- Kredensial TTS ada di environment container dan karena itu dapat dibaca proses yang dijalankan Claude.
+
 ## [0.5.1] - 2026-11-06
 
 ### Diperbaiki

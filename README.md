@@ -76,6 +76,23 @@ atau kirim video dengan keterangan *"potong menit 0:10–0:25 lalu kecilkan jadi
 - Image jadi sekitar 0,6 GB lebih besar. Tanpa video: `docker compose build --build-arg WITH_FFMPEG=false`.
 - Mode host: pasang sendiri (`sudo apt install ffmpeg fonts-dejavu-core`); panduan video baru aktif jika `ffmpeg` ada di PATH.
 
+## Narasi suara (VoiceStudio atau TTS lain)
+
+Isi `TTS_BASE_URL` (dan kredensial) di `.env`, lalu minta *"buatkan video … dengan narasi"*. Claude menambahkan
+`narration` per scene; durasi scene menyesuaikan panjang suara. Cek koneksi dan temukan nama suara/engine:
+`docker compose exec clautele python -m clautele.tts --probe`.
+
+Contoh memakai [VoiceStudio](https://github.com/debpalash/VoiceStudio) di komputer sendiri (API kompatibel OpenAI di
+`localhost:3900`). Komputer Anda tidak terlihat dari VPS, jadi perlu tunnel. **Baca peringatannya:**
+- Permintaan dari `localhost` tidak pernah diminta kunci oleh VoiceStudio. Tunnel yang berjalan di komputer yang sama
+  membuat semua permintaan tampak lokal, **termasuk rute admin**. Siapa pun yang memegang kredensial tunnel bisa
+  menjangkau semuanya. Pakai password acak panjang, batasi path yang diteruskan (hanya `/health`,
+  `/v1/audio/speech`, `/v1/audio/transcriptions`), dan uji bahwa permintaan tanpa kredensial ditolak.
+- Dokumentasi VoiceStudio menyarankan Tailscale dan melarang mengekspos backend kloning suara ke internet terbuka.
+- Kredensial TTS berada di environment container sehingga dapat dibaca proses yang dijalankan Claude.
+- Komputer harus menyala; bila tidak, video dengan narasi gagal dengan pesan jelas (tanpa narasi tetap bisa).
+- Kloning suara hanya untuk suara yang Anda punya izinnya.
+
 ## Percakapan dimulai ulang saat bot diperbarui
 
 Instruksi untuk Claude hanya dibaca pada giliran pertama sebuah sesi. Karena itu, setelah update bot atau perubahan

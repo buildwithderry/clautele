@@ -17,6 +17,9 @@
 - [x] Smoke test: Claude Code di container berhasil autentikasi dengan kredensial yang di-mount
 
 ## Belum
+- [ ] **Validasi TTS terhadap VoiceStudio asli**: isi `TTS_BASIC_AUTH` di `.env`, jalankan `--probe`, uji suara kloning 'adult', lalu beri tag versi
+- [ ] Pengetatan tunnel: password acak + allowlist path (`/health`, `/v1/audio/speech`, `/v1/audio/transcriptions`)
+- [ ] Transkripsi pesan suara lewat `/v1/audio/transcriptions` (menggantikan rencana Whisper di VPS)
 - [ ] Pasang service host: ditolak pengaman Claude Code ("Unauthorized Persistence"); pemilik harus menjalankan sendiri: (1) `python -m clautele.totp` di terminal pribadi, isi `TOTP_SECRET` di `.env`; (2) `docker compose stop clautele && bash deploy/install-host.sh`
 - [ ] Push ke GitHub (VPS belum punya kredensial GitHub)
 - [ ] Uji langsung dengan token bot Telegram asli (butuh token dari pemilik)

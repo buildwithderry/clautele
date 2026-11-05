@@ -82,3 +82,21 @@ def test_send_limits_validated():
     for k, v in [("SEND_MAX_MB", "51"), ("UPLOAD_MAX_MB", "21"), ("SEND_MAX_MB", "x")]:
         with pytest.raises(ConfigError):
             Config.from_env({**BASE, k: v})
+
+
+def test_load_dotenv_duplicate_key_last_wins(tmp_path):
+    from clautele.config import load_dotenv
+
+    f = tmp_path / ".env"
+    f.write_text("CLAUDE_ALLOWED_TOOLS=Read Grep Glob\nX=1\nCLAUDE_ALLOWED_TOOLS=Bash(ffmpeg *)\n")
+    env: dict = {}
+    assert load_dotenv(f, env) == 2  # dua kunci unik, bukan tiga baris
+    assert env["CLAUDE_ALLOWED_TOOLS"] == "Bash(ffmpeg *)"  # sama dengan docker compose
+
+
+def test_tts_config_is_optional_and_validated():
+    assert Config.from_env(BASE).tts is None
+    cfg = Config.from_env({**BASE, "TTS_BASE_URL": "https://x.example.com", "TTS_BASIC_AUTH": "u:p", "TTS_VOICE": "adult"})
+    assert cfg.tts.voice == "adult" and "u:p" not in repr(cfg)
+    with pytest.raises(ConfigError, match="TTS"):
+        Config.from_env({**BASE, "TTS_BASE_URL": "http://example.com"})  # http ke host non-loopback ditolak

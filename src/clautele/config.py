@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .totp import TotpError, validate_secret
+from .tts import TtsConfig, TtsError
 
 VALID_MODES = ("plan", "acceptEdits", "auto", "dontAsk", "bypassPermissions")
 
@@ -20,7 +21,7 @@ def load_dotenv(path: Path, env: dict[str, str] | None = None) -> int:
     """Baca file .env sederhana (KEY=VALUE per baris) ke environment.
 
     Nilai yang sudah ada di environment tidak ditimpa, jadi `docker compose` dan
-    systemd tetap menang. Mendukung nilai berspasi tanpa tanda kutip; kutip yang
+    systemd tetap menang. Kunci duplikat di dalam berkas: yang terakhir menang, seperti docker compose. Mendukung nilai berspasi tanpa tanda kutip; kutip yang
     membungkus seluruh nilai dibuang. Mengembalikan jumlah variabel yang dimuat.
     """
     target = os.environ if env is None else env
@@ -28,7 +29,7 @@ def load_dotenv(path: Path, env: dict[str, str] | None = None) -> int:
         lines = path.read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
         return 0
-    loaded = 0
+    parsed: dict[str, str] = {}
     for raw in lines:
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -38,7 +39,11 @@ def load_dotenv(path: Path, env: dict[str, str] | None = None) -> int:
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
-        if key and key not in target:
+        if key:
+            parsed[key] = value  # kunci duplikat: yang TERAKHIR menang (sama dengan docker compose)
+    loaded = 0
+    for key, value in parsed.items():
+        if key not in target:
             target[key] = value
             loaded += 1
     return loaded
@@ -86,6 +91,7 @@ class Config:
     send_roots: tuple[Path, ...] = ()
     send_max_mb: int = 50
     upload_max_mb: int = 20
+    tts: TtsConfig | None = None
 
     @property
     def outbox_dir(self) -> Path:
@@ -164,6 +170,11 @@ class Config:
         if not 1 <= upload_max_mb <= 20:
             raise ConfigError("UPLOAD_MAX_MB harus 1-20 (batas unduh bot Telegram 20 MB).")
 
+        try:
+            tts = TtsConfig.from_env(e)
+        except TtsError as exc:
+            raise ConfigError(f"konfigurasi TTS salah: {exc}") from exc
+
         return cls(
             telegram_token=token,
             allowed_user_ids=allowed,
@@ -186,5 +197,6 @@ class Config:
             send_roots=send_roots,
             send_max_mb=send_max_mb,
             upload_max_mb=upload_max_mb,
+            tts=tts,
             extra_args=tuple(shlex.split(e.get("CLAUDE_EXTRA_ARGS", ""))),
         )

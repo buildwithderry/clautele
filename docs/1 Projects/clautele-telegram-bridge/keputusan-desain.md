@@ -133,3 +133,25 @@ Laporan: setelah v0.5.0, video tetap dijawab dengan skrip `.sh` dan Claude bilan
   sesi baru dengan prompt yang saya rancang. Tiga uji sebelumnya lolos karena memakai sesi baru.
 - **Tidak dilakukan:** `--permission-prompt-tool` (MCP) agar izin bisa disetujui sinkron di tengah giliran; lebih besar
   dan belum perlu.
+
+## 12. Narasi suara lewat endpoint TTS generik (belum dirilis)
+Kebutuhan: video bernarasi dengan suara kloning pemilik, yang berjalan di Mac pemilik (VoiceStudio), bukan di VPS.
+- **Generik, bukan terikat produk:** klien untuk `POST /v1/audio/speech` kompatibel OpenAI. VoiceStudio berlisensi AGPL-3.0;
+  memanggilnya lewat HTTP tidak mengikat repo ini, dan klien yang sama cocok untuk engine lain.
+- **Fakta dari dokumentasi resmi VoiceStudio** (`api-auth.md`, `production-private-api.md`, `remote-gpu.md`): bahasa
+  Indonesia didukung model OmniVoice; permintaan dari loopback tidak pernah dikenai kunci; dari luar mesin wajib
+  `OMNIVOICE_API_KEY` + `Authorization: Bearer`; vendor menyarankan Tailscale dan melarang ekspos ke internet terbuka.
+  Tidak dinyatakan: cara memilih suara kloning lewat API dan endpoint daftar suara, sehingga ada `--probe`.
+- **Jebakan "tunnel = loopback":** tunnel di komputer yang sama membuat semua permintaan tampak lokal, jadi kredensial
+  tunnel menjadi satu-satunya pintu dan juga membuka rute admin. Terverifikasi: tunnel pemilik menolak permintaan tanpa
+  kredensial (401, `WWW-Authenticate: Basic realm="ngrok"`), yaitu penolakan di sisi ngrok, bukan VoiceStudio.
+- **Batasan pemilik:** tidak ada instalasi di VPS (Tailscale ditolak). Maka jalur yang dipakai adalah ngrok dari Mac.
+- **Pengaman klien:** HTTPS wajib kecuali loopback; redirect ditolak (urllib meneruskan header Authorization ke host
+  tujuan redirect); respons dibatasi 40 MB dan harus audio (magic bytes); kredensial tidak di `repr`, pesan error, atau
+  keluaran `--probe`; `Authorization` hanya satu (Basic ATAU Bearer) karena header-nya sama.
+- **Gagal cepat:** seluruh narasi disintesis sebelum render video dimulai; TTS mati tidak membuang menit render.
+- **Risiko yang diterima dan dicatat:** kredensial TTS ada di environment container dan dapat dibaca proses yang
+  dijalankan Claude (user yang sama). Mitigasi ada di sisi tunnel: password acak, allowlist path, dan 2FA bot.
+- **Temuan sampingan:** `CLAUDE_ALLOWED_TOOLS=*` tidak berpengaruh (diuji); pembaca `.env` kita salah menangani
+  kunci duplikat (first-wins vs compose last-wins), sudah diperbaiki.
+- **Perbaikan bug lama:** musik yang lebih pendek dari video memotong video; kini diulang.

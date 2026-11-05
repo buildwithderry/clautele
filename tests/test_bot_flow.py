@@ -588,3 +588,50 @@ async def test_ffprobe_rule_only_added_when_ffprobe_exists(tmp_path, monkeypatch
     await bot.run_prompt(ctx, 1, "x")
     tools = " ".join(m.text for m in ctx.bot.sent).split("|SP:")[0]
     assert "Bash(clautele-video *)" in tools and "ffprobe" not in tools
+
+
+# ---------- TTS: /status dan panduan narasi ----------
+
+
+async def test_status_reports_tts_state(tmp_path):
+    from helpers_tts import SECRET, Server
+
+    bot0, ctx0, _ = make(tmp_path, QUESTION_CLAUDE)
+    u0 = FakeUpdate(5)
+    await bot0.cmd_status(u0, ctx0)
+    assert "Suara (TTS): belum dikonfigurasi" in u0.replies[0]
+
+    srv = Server()
+    try:
+        (tmp_path / "b").mkdir()
+        bot, ctx, _ = make(tmp_path / "b", QUESTION_CLAUDE, {"TTS_BASE_URL": srv.url, "TTS_BASIC_AUTH": f"u:{SECRET}", "TTS_VOICE": "adult"})
+        up = FakeUpdate(5)
+        await bot.cmd_status(up, ctx)
+        assert "'adult'" in up.replies[0] and "terhubung" in up.replies[0] and SECRET not in up.replies[0]
+        srv.mode = "401"
+        up2 = FakeUpdate(5)
+        await bot.cmd_status(up2, ctx)
+        assert "TIDAK terjangkau" in up2.replies[0] and SECRET not in up2.replies[0]
+    finally:
+        srv.close()
+
+
+async def test_narration_guidance_only_with_tts(tmp_path, monkeypatch):
+    from helpers_tts import SECRET, Server
+
+    have = {"ffmpeg": "/usr/bin/ffmpeg", "clautele-video": "/usr/local/bin/clautele-video"}
+    monkeypatch.setattr("clautele.bot.shutil.which", lambda n: have.get(n))
+    bot, ctx, _ = make(tmp_path, ALLOWED_CLAUDE)
+    await bot.run_prompt(ctx, 1, "x")
+    assert '"narration"' not in " ".join(m.text for m in ctx.bot.sent)
+
+    srv = Server()
+    try:
+        (tmp_path / "b").mkdir()
+        bot2, ctx2, _ = make(tmp_path / "b", ALLOWED_CLAUDE, {"TTS_BASE_URL": srv.url, "TTS_BASIC_AUTH": f"u:{SECRET}"})
+        await bot2.run_prompt(ctx2, 1, "x")
+        out = " ".join(m.text for m in ctx2.bot.sent)
+        assert '"narration"' in out and "jangan berpura-pura" in out
+        assert SECRET not in out  # kredensial tidak pernah masuk ke instruksi untuk Claude
+    finally:
+        srv.close()

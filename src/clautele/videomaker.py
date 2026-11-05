@@ -11,6 +11,7 @@ lalu semua scene digabung. Tidak ada dependensi selain ffmpeg dan stdlib.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 import shutil
@@ -20,6 +21,8 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from .tts import TtsConfig, TtsError, audio_duration, synthesize
 
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 SIZES = {
@@ -43,6 +46,11 @@ PALETTE = {
 CYCLE = ["cyan", "magenta", "green", "yellow", "purple", "orange"]
 MAX_SCENES = 40
 MAX_TOTAL_SECONDS = 180
+MAX_NARRATION_CHARS = 500  # per scene
+MAX_NARRATION_TOTAL = 6000
+VOICE_LEAD = 0.4  # jeda sebelum suara mulai (detik)
+VOICE_TAIL = 0.6  # jeda setelah suara selesai (detik)
+MUSIC_VOLUME = 0.22  # musik latar saat ada narasi
 BG = "07000F"
 HEX_RE = re.compile(r"#?([0-9A-Fa-f]{6})")
 
@@ -58,6 +66,7 @@ Spec JSON:
       "label": "01",          // opsional, teks kecil di atas judul (nomor/kategori)
       "title": "APA ITU EA?", // judul besar, opsional
       "body": "Penjelasan.",  // isi, opsional (diperkecil otomatis, dibungkus per baris)
+      "narration": "Teks yang dibacakan.", // opsional; butuh TTS (TTS_BASE_URL). Durasi scene menyesuaikan panjang suara
       "color": "cyan",        // cyan|magenta|green|yellow|orange|red|blue|purple|white|#RRGGBB (default: bergilir)
       "duration": 4           // detik, 1-30 (default 4)
     }
@@ -90,6 +99,7 @@ class Scene:
     body: str
     color: str  # RRGGBB
     duration: float
+    narration: str = ""
 
 
 @dataclass(frozen=True)
@@ -171,10 +181,13 @@ def parse_spec(data: Any, *, base_dir: Path) -> Spec:
         title = _text(sc, "title", 120, i)
         body = _text(sc, "body", 400, i)
         label = _text(sc, "label", 40, i)
+        narration = _text(sc, "narration", MAX_NARRATION_CHARS, i)
         if not (title or body or label):
             raise SpecError(f"scene {i + 1}: isi title, body, atau label")
-        scenes.append(Scene(label, title, body, _color(sc.get("color"), i), duration))
+        scenes.append(Scene(label, title, body, _color(sc.get("color"), i), duration, narration))
 
+    if sum(len(s.narration) for s in scenes) > MAX_NARRATION_TOTAL:
+        raise SpecError(f"total narasi melebihi {MAX_NARRATION_TOTAL} karakter")
     total = sum(s.duration for s in scenes)
     if total > MAX_TOTAL_SECONDS:
         raise SpecError(f"total durasi {total:.0f} detik melebihi batas {MAX_TOTAL_SECONDS} detik")
@@ -344,7 +357,10 @@ def _text_chain(spec: Spec, scene: Scene, lines: list[TextLine], color: str, fil
     return ",".join(parts) if parts else "null"
 
 
-def scene_command(spec: Spec, scene: Scene, lines: list[TextLine], files: list[Path], out: Path) -> list[str]:
+def scene_command(
+    spec: Spec, scene: Scene, lines: list[TextLine], files: list[Path], out: Path,
+    *, with_audio: bool = False, voice: Path | None = None,
+) -> list[str]:
     w, h, fps, d = spec.width, spec.height, spec.fps, scene.duration
     grid = max(40, w // 18)
     core = _mix_white(scene.color, 0.65)
@@ -358,8 +374,18 @@ def scene_command(spec: Spec, scene: Scene, lines: list[TextLine], files: list[P
     glow_src = _text_chain(spec, scene, lines, scene.color, files, border=True)
     core_src = _text_chain(spec, scene, lines, core, files, border=True)
     # Blend "screen" hanya benar di ruang RGB; di YUV hitam (chroma 128) tergeser jadi warna. Karena itu gbrp.
+    audio_graph: list[str] = []
+    if with_audio:
+        if voice is not None:  # suara ditunda sedikit, lalu diisi hening sampai scene berakhir
+            audio_graph = [
+                "[3:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                f"adelay={int(VOICE_LEAD * 1000)}|{int(VOICE_LEAD * 1000)},apad[a]"
+            ]
+        else:  # scene tanpa narasi tetap perlu trek audio agar semua segmen seragam saat digabung
+            audio_graph = ["[3:a]aformat=sample_fmts=fltp:channel_layouts=stereo[a]"]
     graph = ";".join(
         [
+            *audio_graph,
             bg,
             f"[1:v]{glow_src},format=gbrp,split=2[g1][g2]",
             f"[g1]scale={half_w}:{half_h},gblur=sigma={sig_big},scale={w}:{h}[gb]",
@@ -371,27 +397,70 @@ def scene_command(spec: Spec, scene: Scene, lines: list[TextLine], files: list[P
         ]
     )
     src = lambda color: f"color=c=0x{color}:s={w}x{h}:r={fps}:d={d:.3f}"
-    return [
-        "ffmpeg", "-y", "-loglevel", "error",
+    inputs = [
         "-f", "lavfi", "-i", src(BG),
         "-f", "lavfi", "-i", src("000000"),
         "-f", "lavfi", "-i", src("000000"),
+    ]  # fmt: skip
+    if with_audio:
+        inputs += ["-i", str(voice)] if voice is not None else ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
+    audio_out = (
+        ["-map", "[a]", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2", "-t", f"{d:.3f}"]
+        if with_audio
+        else ["-an"]
+    )
+    return [
+        "ffmpeg", "-y", "-loglevel", "error", *inputs,
         "-filter_complex", graph, "-map", "[v]",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(fps), "-an",
-        str(out),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(fps),
+        *audio_out, str(out),
     ]  # fmt: skip
 
 
-def concat_command(list_file: Path, spec: Spec, out: Path) -> list[str]:
+def concat_command(list_file: Path, spec: Spec, out: Path, *, has_narration: bool = False) -> list[str]:
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(list_file)]
-    if spec.audio:
-        cmd += ["-i", str(spec.audio), "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-shortest"]
+    if spec.audio and has_narration:  # musik diulang dan dikecilkan di bawah suara
+        cmd += ["-stream_loop", "-1", "-i", str(spec.audio)]
+        mix = f"[1:a]volume={MUSIC_VOLUME}[m];[0:a][m]amix=inputs=2:duration=first:dropout_transition=0,volume=2[a]"
+        cmd += ["-filter_complex", mix, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-shortest"]
+    elif spec.audio:  # musik diulang agar tidak memotong video bila lebih pendek
+        cmd += ["-stream_loop", "-1", "-i", str(spec.audio), "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-shortest"]
     else:
         cmd += ["-c", "copy"]
     return [*cmd, "-movflags", "+faststart", str(out)]
 
 
-def render(spec: Spec, out: Path, *, log=lambda m: print(m, file=sys.stderr, flush=True)) -> None:
+def _narrate(spec: Spec, tts_cfg: TtsConfig | None, tts_error: str, tmp: Path, log) -> tuple[Spec, dict[int, Path]]:
+    """Sintesis semua narasi DULU (gagal cepat sebelum render berjam-jam), lalu sesuaikan durasi scene."""
+    voices: dict[int, Path] = {}
+    if not any(sc.narration for sc in spec.scenes):
+        return spec, voices
+    if tts_cfg is None:
+        raise SpecError(tts_error or "narasi diminta tetapi TTS belum dikonfigurasi (isi TTS_BASE_URL di .env)")
+    scenes = list(spec.scenes)
+    for i, sc in enumerate(scenes):
+        if not sc.narration:
+            continue
+        log(f"narasi {i + 1}/{len(scenes)}")
+        try:
+            data = synthesize(tts_cfg, sc.narration)
+        except TtsError as exc:
+            raise SpecError(f"TTS gagal pada scene {i + 1}: {exc}") from None
+        path = tmp / f"voice{i + 1}.audio"
+        path.write_bytes(data)
+        try:
+            dur = audio_duration(path)
+        except TtsError as exc:
+            raise SpecError(f"scene {i + 1}: {exc}") from None
+        scenes[i] = dataclasses.replace(sc, duration=max(sc.duration, round(VOICE_LEAD + dur + VOICE_TAIL, 2)))
+        voices[i] = path
+    total = sum(s.duration for s in scenes)
+    if total > MAX_TOTAL_SECONDS:
+        raise SpecError(f"dengan narasi, total durasi {total:.0f} detik melebihi batas {MAX_TOTAL_SECONDS} detik; ringkas narasinya")
+    return dataclasses.replace(spec, scenes=tuple(scenes)), voices
+
+
+def render(spec: Spec, out: Path, *, tts_cfg: TtsConfig | None = None, tts_error: str = "", log=lambda m: print(m, file=sys.stderr, flush=True)) -> None:
     if shutil.which("ffmpeg") is None:
         raise SpecError("ffmpeg tidak terpasang")
     if not Path(FONT).is_file():
@@ -399,6 +468,8 @@ def render(spec: Spec, out: Path, *, log=lambda m: print(m, file=sys.stderr, flu
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="clautele-video-") as tmp_s:
         tmp = Path(tmp_s)
+        spec, voices = _narrate(spec, tts_cfg, tts_error, tmp, log)
+        with_audio = bool(voices)
         segments: list[Path] = []
         for i, scene in enumerate(spec.scenes, 1):
             log(f"scene {i}/{len(spec.scenes)}")
@@ -409,13 +480,14 @@ def render(spec: Spec, out: Path, *, log=lambda m: print(m, file=sys.stderr, flu
                 f.write_text(ln.text, encoding="utf-8")
                 files.append(f)
             seg = tmp / f"seg{i:03d}.mp4"
-            r = subprocess.run(scene_command(spec, scene, lines, files, seg), capture_output=True, text=True)
+            cmd = scene_command(spec, scene, lines, files, seg, with_audio=with_audio, voice=voices.get(i - 1))
+            r = subprocess.run(cmd, capture_output=True, text=True)
             if r.returncode != 0 or not seg.exists():
                 raise SpecError(f"ffmpeg gagal pada scene {i}: {r.stderr.strip()[-600:]}")
             segments.append(seg)
         listing = tmp / "list.txt"
         listing.write_text("".join(f"file '{s}'\n" for s in segments), encoding="utf-8")
-        r = subprocess.run(concat_command(listing, spec, out), capture_output=True, text=True)
+        r = subprocess.run(concat_command(listing, spec, out, has_narration=with_audio), capture_output=True, text=True)
         if r.returncode != 0 or not out.exists():
             raise SpecError(f"ffmpeg gagal menggabung: {r.stderr.strip()[-600:]}")
 
@@ -443,12 +515,16 @@ def main(argv: list[str]) -> int:
         out = _inside(base, Path(argv[1]), must_exist=False, what="output")
         if out.suffix.lower() != ".mp4":
             raise SpecError("output harus berekstensi .mp4")
-        render(spec, out)
+        try:
+            tts_cfg, tts_error = TtsConfig.from_env(), ""
+        except TtsError as exc:
+            tts_cfg, tts_error = None, f"konfigurasi TTS salah: {exc}"
+        render(spec, out, tts_cfg=tts_cfg, tts_error=tts_error)
     except SpecError as exc:
         print(f"GAGAL: {exc}", file=sys.stderr)
         return 1
     size = out.stat().st_size / (1024 * 1024)
-    print(f"OK {out} ({spec.total_seconds:.0f} detik, {spec.width}x{spec.height}, {size:.1f} MB)")
+    print(f"OK {out} ({size:.1f} MB, {spec.width}x{spec.height})")
     return 0
 
 
