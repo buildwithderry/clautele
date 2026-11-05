@@ -44,6 +44,25 @@ Ngobrol dengan **Claude Code** yang berjalan di VPS Anda lewat **bot Telegram**.
 | `/model <nama>` | Ganti model (kosong = default) |
 | `/id` | Tampilkan user ID Anda |
 
+## Pilih tingkat akses
+
+Seberapa banyak yang boleh disentuh Claude ditentukan oleh cara Anda menjalankan bot.
+
+| Tingkat | Cara | Claude bisa |
+|---|---|---|
+| 1. Sandbox (default) | `docker compose up -d` | Hanya isi `workspace/` |
+| 2. Folder tertentu | Docker + `WORKSPACE_DIR=/path/folder` di `.env` | Hanya folder itu |
+| 3. Penuh di host | `bash deploy/install-host.sh` (tanpa Docker) | Semua yang bisa dilakukan akun Linux Anda, termasuk `docker`, `git`, dan semua folder |
+
+**Tingkat 3 bukan sandbox.** Siapa pun yang lolos `ALLOWED_USER_IDS` (atau yang mengambil alih akun Telegram Anda)
+praktis punya shell di server. Pakai hanya di server milik sendiri, biarkan `CLAUDE_PERMISSION_MODE=acceptEdits`
+dan jangan aktifkan `ALLOW_BYPASS_PERMISSIONS`. Mode host memakai login Claude yang sudah ada di akun itu
+(`~/.claude`), jadi `claude-config/` tidak dipakai.
+
+Skrip host memasang *systemd user service* (tanpa `sudo`), membaca `.env` dari folder repo, dan menolak jalan kalau
+container Docker `clautele` masih aktif (dua instance dengan token sama bentrok). Perintah berguna:
+`systemctl --user status clautele`, `journalctl --user -u clautele -f`, `systemctl --user disable --now clautele`.
+
 ## Izin & keamanan
 
 Bot berjalan tanpa terminal, jadi permintaan izin Claude **ditolak otomatis** lalu ditawarkan sebagai tombol

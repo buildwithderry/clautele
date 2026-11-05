@@ -29,3 +29,13 @@ dihapus oleh `/end_claude`.
 Folder `claude-config/` di-mount ke `/home/node/.claude` dengan `CLAUDE_CONFIG_DIR`. Terverifikasi: hanya
 `.credentials.json` yang perlu disalin dari host. Tanpa `CLAUDE_CONFIG_DIR`, Claude minta `~/.claude.json` yang
 berada di luar folder dan hilang saat container dibuat ulang.
+
+## 6. Tiga tingkat akses (sandbox → folder → host penuh)
+Repo ini untuk dibagikan, jadi default harus aman: Docker dengan `/workspace` saja. Akses lebih luas adalah opt-in
+(`WORKSPACE_DIR`, atau mode host lewat `deploy/install-host.sh`). Mount socket Docker sengaja **tidak** disediakan:
+setara akses root ke host.
+Pemicu keputusan: Claude di container tidak bisa menjalankan `docker ps` (tidak ada CLI/socket), padahal pemilik VPS
+ingin mengelola server dari Telegram. Pemilik memilih tingkat 3 untuk VPS-nya sendiri.
+Mode host: venv di repo, `.env` dimuat aplikasi (`load_dotenv`; nilai berspasi seperti
+`CLAUDE_ALLOWED_TOOLS=Read Grep Glob` tidak aman di-`source` lewat bash), service `systemd --user`.
+Catatan operasional: Docker dan host memakai satu token bot, jadi hanya satu yang boleh jalan.

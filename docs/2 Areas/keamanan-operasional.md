@@ -11,6 +11,12 @@
 - [ ] `claude-config/` berisi kredensial: izin folder 700, jangan di-backup ke tempat publik
 - [ ] `SHOW_TOOL_OUTPUT` mati kecuali perlu (output tool bisa memuat data sensitif)
 
+## Mode host (tingkat 3)
+- [ ] Hanya satu instance per token: hentikan container Docker sebelum service host (`getUpdates` 409 kalau bentrok)
+- [ ] `CLAUDE_PERMISSION_MODE=acceptEdits`; jangan `bypassPermissions`
+- [ ] Akun Telegram pemilik memakai verifikasi dua langkah (mengambil alih akun = shell di server)
+- [ ] `journalctl --user -u clautele` tidak memuat token (diredam di `__main__.py`)
+
 ## Fakta yang perlu diingat
 - Izin "Bash" yang diberikan lewat tombol berlaku untuk **semua** perintah Bash sampai `/end_claude`.
 - Claude di container hanya melihat `/workspace`, tetapi punya akses jaringan keluar.

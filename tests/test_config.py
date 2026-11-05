@@ -51,3 +51,21 @@ def test_budget_and_timeout():
     assert cfg.max_budget_usd == 1.5 and cfg.timeout_seconds == 60
     with pytest.raises(ConfigError):
         Config.from_env({**BASE, "CLAUDE_MAX_BUDGET_USD": "banyak"})
+
+
+def test_load_dotenv(tmp_path):
+    from clautele.config import load_dotenv
+
+    f = tmp_path / ".env"
+    f.write_text(
+        "# komentar\n\nA=1\nB=Read Grep Glob\nC=\"dua kata\"\nexport D=4\nTAKADA\nA2=x=y\nEXISTING=baru\n"
+    )
+    env = {"EXISTING": "lama"}
+    assert load_dotenv(f, env) == 5
+    assert env["A"] == "1"
+    assert env["B"] == "Read Grep Glob"  # nilai berspasi utuh
+    assert env["C"] == "dua kata"  # kutip pembungkus dibuang
+    assert env["D"] == "4"
+    assert env["A2"] == "x=y"
+    assert env["EXISTING"] == "lama"  # tidak menimpa
+    assert load_dotenv(tmp_path / "tidak-ada", env) == 0

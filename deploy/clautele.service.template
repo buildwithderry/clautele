@@ -1,0 +1,21 @@
+[Unit]
+Description=Clautele: bot Telegram untuk Claude Code
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# __REPO__ dan __HOME__ diisi oleh deploy/install-host.sh
+WorkingDirectory=__REPO__
+# .env dimuat oleh aplikasi sendiri (WorkingDirectory/.env)
+Environment=PATH=__HOME__/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+ExecStart=__REPO__/.venv/bin/python -m clautele
+Environment=PYTHONPATH=__REPO__/src
+Restart=on-failure
+RestartSec=5
+# Gagal konfigurasi (exit 2/3) tidak perlu diulang terus
+RestartPreventExitStatus=2 3
+
+[Install]
+WantedBy=default.target

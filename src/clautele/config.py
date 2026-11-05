@@ -14,6 +14,34 @@ class ConfigError(RuntimeError):
     pass
 
 
+def load_dotenv(path: Path, env: dict[str, str] | None = None) -> int:
+    """Baca file .env sederhana (KEY=VALUE per baris) ke environment.
+
+    Nilai yang sudah ada di environment tidak ditimpa, jadi `docker compose` dan
+    systemd tetap menang. Mendukung nilai berspasi tanpa tanda kutip; kutip yang
+    membungkus seluruh nilai dibuang. Mengembalikan jumlah variabel yang dimuat.
+    """
+    target = os.environ if env is None else env
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return 0
+    loaded = 0
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.removeprefix("export ").strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key and key not in target:
+            target[key] = value
+            loaded += 1
+    return loaded
+
+
 def _bool(value: str | None, default: bool = False) -> bool:
     if value is None or value.strip() == "":
         return default

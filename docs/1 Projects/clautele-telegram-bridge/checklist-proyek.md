@@ -7,10 +7,13 @@
 - [x] Pertanyaan → tombol, jawaban bebas
 - [x] Tombol izinkan tool yang ditolak
 - [x] Docker multi-stage, compose, `.env.example`
-- [x] 36 test otomatis (config, parser, runner, store, alur bot dengan Telegram & claude palsu)
+- [x] Mode host: `deploy/install-host.sh` + template service (ditulis, **belum dipasang**, lihat bawah)
+- [x] 37 test otomatis (config, parser, runner, store, alur bot dengan Telegram & claude palsu)
 - [x] Smoke test: Claude Code di container berhasil autentikasi dengan kredensial yang di-mount
 
 ## Belum
+- [ ] Pasang service host: ditolak pengaman Claude Code ("Unauthorized Persistence"); pemilik harus menjalankan `docker compose stop clautele && bash deploy/install-host.sh` sendiri
+- [ ] Push ke GitHub (VPS belum punya kredensial GitHub)
 - [ ] Uji langsung dengan token bot Telegram asli (butuh token dari pemilik)
 - [ ] Pesan suara / foto / dokumen sebagai input
 - [ ] Server MCP `ask_user` untuk pertanyaan sinkron

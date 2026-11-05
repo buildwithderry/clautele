@@ -10,7 +10,9 @@ from telegram.error import InvalidToken, NetworkError
 from telegram.ext import Application
 
 from .bot import ClauteleBot
-from .config import Config, ConfigError
+from pathlib import Path
+
+from .config import Config, ConfigError, load_dotenv
 from .store import StateStore
 
 
@@ -20,6 +22,9 @@ def main() -> int:
     )
     # Token ada di URL request httpx; jangan cetak di log INFO.
     logging.getLogger("httpx").setLevel(logging.WARNING)
+
+    # Mode host (tanpa Docker): muat .env dari folder kerja. Variabel yang sudah ada tidak ditimpa.
+    load_dotenv(Path(".env"))
 
     try:
         cfg = Config.from_env()
