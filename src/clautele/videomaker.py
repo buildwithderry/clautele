@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .tts import TtsConfig, TtsError, audio_duration, synthesize
+from .tts import TtsConfig, TtsError, audio_duration, resolve_voice, synthesize
 
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 SIZES = {
@@ -437,6 +437,10 @@ def _narrate(spec: Spec, tts_cfg: TtsConfig | None, tts_error: str, tmp: Path, l
         return spec, voices
     if tts_cfg is None:
         raise SpecError(tts_error or "narasi diminta tetapi TTS belum dikonfigurasi (isi TTS_BASE_URL di .env)")
+    try:
+        tts_cfg = resolve_voice(tts_cfg)  # gagal cepat bila suara tidak ada (server akan diam-diam memakai suara bawaan)
+    except TtsError as exc:
+        raise SpecError(f"TTS: {exc}") from None
     scenes = list(spec.scenes)
     for i, sc in enumerate(scenes):
         if not sc.narration:

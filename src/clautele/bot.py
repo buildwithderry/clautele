@@ -47,7 +47,7 @@ from .files import (
 from .runner import ClaudeRun, RunResult, assistant_blocks, build_args
 from .store import StateStore
 from .totp import TotpGate
-from .tts import health as tts_health
+from .tts import TtsError, health as tts_health, resolve_voice
 from .textutil import describe_tool_use, format_denials, split_message
 
 log = logging.getLogger("clautele")
@@ -217,9 +217,16 @@ class ClauteleBot:
             lines.append("Suara (TTS): belum dikonfigurasi")
         else:
             ok, detail = await asyncio.to_thread(tts_health, self.cfg.tts)
+            voice_note = ""
+            if ok:
+                try:
+                    await asyncio.to_thread(resolve_voice, self.cfg.tts)
+                except TtsError as exc:
+                    voice_note = f" ⚠️ {str(exc)[:160]}"
             lines.append(
                 f"Suara (TTS {self.cfg.tts.host}, suara '{self.cfg.tts.voice}'): "
                 + ("terhubung" if ok else f"TIDAK terjangkau ({detail})")
+                + voice_note
             )
         await update.effective_message.reply_text("\n".join(lines))
 

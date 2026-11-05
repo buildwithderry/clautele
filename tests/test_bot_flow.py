@@ -635,3 +635,16 @@ async def test_narration_guidance_only_with_tts(tmp_path, monkeypatch):
         assert SECRET not in out  # kredensial tidak pernah masuk ke instruksi untuk Claude
     finally:
         srv.close()
+
+
+async def test_status_warns_when_voice_missing(tmp_path):
+    from helpers_tts import SECRET, Server
+
+    srv = Server()
+    try:
+        bot, ctx, _ = make(tmp_path, QUESTION_CLAUDE, {"TTS_BASE_URL": srv.url, "TTS_BASIC_AUTH": f"u:{SECRET}", "TTS_VOICE": "tidak-ada"})
+        up = FakeUpdate(5)
+        await bot.cmd_status(up, ctx)
+        assert "terhubung" in up.replies[0] and "⚠️" in up.replies[0] and "DIAM-DIAM" in up.replies[0]
+    finally:
+        srv.close()

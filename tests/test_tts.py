@@ -153,3 +153,39 @@ def test_probe_lists_voice_paths_and_masks_credentials(srv, monkeypatch):
     assert "/v1/audio/speech" in text and "/voices/profiles" in text and "omni-tts" in text
     assert "sintesis: OK" in text
     assert SECRET not in text and "derry" not in text and "Basic " not in text
+
+
+# ---------- validasi suara (server diam-diam memakai suara bawaan untuk nama yang salah) ----------
+
+
+def test_resolve_voice_accepts_id_and_resolves_unique_name(srv):
+    assert tts.resolve_voice(cfg_for(srv, TTS_VOICE="abc12345")).voice == "abc12345"
+    assert tts.resolve_voice(cfg_for(srv, TTS_VOICE="ALLOY")).voice == "ALLOY"  # alias bawaan sah, id tidak diubah
+    assert tts.resolve_voice(cfg_for(srv, TTS_VOICE="hyvay ADULT_1")).voice == "abc12345"  # nama lengkap -> id
+
+
+def test_resolve_voice_rejects_unknown_name_with_available_list(srv):
+    with pytest.raises(TtsError) as e:
+        tts.resolve_voice(cfg_for(srv, TTS_VOICE="zzz-tidak-ada"))
+    msg = str(e.value)
+    assert "DIAM-DIAM" in msg and "abc12345" in msg and "HyVay adult_1" in msg
+    assert "Alloy" not in msg  # alias bawaan tidak membanjiri daftar
+    assert SECRET not in msg
+
+
+def test_resolve_voice_trusts_config_when_server_has_no_voice_list(srv):
+    srv.mode = "novoices"
+    assert tts.resolve_voice(cfg_for(srv, TTS_VOICE="apa-saja")).voice == "apa-saja"
+
+
+def test_list_voices_tolerates_shapes(srv):
+    v = tts.list_voices(cfg_for(srv))
+    assert {x["id"] for x in v} == {"alloy", "abc12345", "adult"}
+
+
+def test_probe_warns_about_unknown_voice(srv, monkeypatch):
+    monkeypatch.setattr(tts, "audio_duration", lambda p: 0.5)
+    lines: list[str] = []
+    assert tts.probe(cfg_for(srv, TTS_VOICE="zzz"), out=lines.append) == 1
+    assert any("PERINGATAN" in l and "DIAM-DIAM" in l for l in lines)
+    assert not any("sintesis: OK" in l for l in lines)  # tidak lanjut menyintesis dengan suara yang salah

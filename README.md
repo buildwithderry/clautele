@@ -24,8 +24,11 @@ Ngobrol dengan **Claude Code** yang berjalan di VPS Anda lewat **bot Telegram**.
    ```
 3. **Autentikasi Claude** (pilih satu):
    - isi `ANTHROPIC_API_KEY` di `.env`, **atau**
-   - pakai akun Claude: `cp ~/.claude/.credentials.json claude-config/` (setelah login `claude` di host), atau
-     `docker compose run --rm clautele claude` lalu `/login`.
+   - pakai akun Claude dengan **login terpisah di container** (disarankan):
+     `docker compose run --rm clautele claude`, lalu `/login`. Kredensial tersimpan di `claude-config/`.
+   - menyalin `~/.claude/.credentials.json` dari host juga bisa, tetapi **rapuh**: refresh token yang sama dipakai di dua
+     tempat, dan begitu salah satu memperbaruinya yang lain gagal ("OAuth session expired") sehingga bot berhenti
+     menjawab. Pakai hanya bila Anda tidak memakai `claude` di host.
 4. **Jalankan**
    ```bash
    docker compose up -d --build
@@ -81,6 +84,9 @@ atau kirim video dengan keterangan *"potong menit 0:10–0:25 lalu kecilkan jadi
 Isi `TTS_BASE_URL` (dan kredensial) di `.env`, lalu minta *"buatkan video … dengan narasi"*. Claude menambahkan
 `narration` per scene; durasi scene menyesuaikan panjang suara. Cek koneksi dan temukan nama suara/engine:
 `docker compose exec clautele python -m clautele.tts --probe`.
+
+**`TTS_VOICE` isi dengan id suara** (hasil `--probe`, bentuknya mis. `abcd1234`), atau nama lengkapnya. VoiceStudio tidak
+menolak nama yang salah, ia diam-diam memakai suara bawaan; klien kami memeriksanya dan menolak dengan daftar suara yang ada.
 
 Contoh memakai [VoiceStudio](https://github.com/debpalash/VoiceStudio) di komputer sendiri (API kompatibel OpenAI di
 `localhost:3900`). Komputer Anda tidak terlihat dari VPS, jadi perlu tunnel. **Baca peringatannya:**

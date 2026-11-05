@@ -30,6 +30,7 @@
 | Tag | Commit | Isi |
 |---|---|---|
 | v0.1.0 | 53f75b5 | Bot Telegram + Docker + dokumentasi PARA |
+| v0.6.0 | (lihat `git show v0.6.0`) | Narasi suara klon via VoiceStudio, validasi nama suara |
 | v0.5.1 | (lihat `git show v0.5.1`) | Reset sesi otomatis saat instruksi berubah, ffprobe, aturan ffmpeg |
 | v0.5.0 | (lihat `git show v0.5.0`) | `clautele-video` neon, perbaikan "video dijawab HTML" |
 | v0.4.0 | (lihat `git show v0.4.0`) | Video (kirim, buat, edit), izin per perintah |

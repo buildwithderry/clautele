@@ -134,7 +134,7 @@ Laporan: setelah v0.5.0, video tetap dijawab dengan skrip `.sh` dan Claude bilan
 - **Tidak dilakukan:** `--permission-prompt-tool` (MCP) agar izin bisa disetujui sinkron di tengah giliran; lebih besar
   dan belum perlu.
 
-## 12. Narasi suara lewat endpoint TTS generik (belum dirilis)
+## 12. Narasi suara lewat endpoint TTS generik (v0.6.0)
 Kebutuhan: video bernarasi dengan suara kloning pemilik, yang berjalan di Mac pemilik (VoiceStudio), bukan di VPS.
 - **Generik, bukan terikat produk:** klien untuk `POST /v1/audio/speech` kompatibel OpenAI. VoiceStudio berlisensi AGPL-3.0;
   memanggilnya lewat HTTP tidak mengikat repo ini, dan klien yang sama cocok untuk engine lain.
@@ -155,3 +155,17 @@ Kebutuhan: video bernarasi dengan suara kloning pemilik, yang berjalan di Mac pe
 - **Temuan sampingan:** `CLAUDE_ALLOWED_TOOLS=*` tidak berpengaruh (diuji); pembaca `.env` kita salah menangani
   kunci duplikat (first-wins vs compose last-wins), sudah diperbaiki.
 - **Perbaikan bug lama:** musik yang lebih pendek dari video memotong video; kini diulang.
+- **Hasil validasi nyata (VoiceStudio asli via ngrok):** health OK; engine `omnivoice` mendukung cloning; `/v1/audio/voices`
+  memberi `voice_id` + `name` + `type` (`openai_alias` atau `profile`); sintesis ~10 detik untuk kalimat pendek di Mac.
+- **Temuan: nama suara salah tidak ditolak server.** Nama ngawur tetap menghasilkan audio (suara bawaan). Perbandingan
+  hash tidak bisa dipakai membuktikannya karena model ini acak (tiap panggilan beda); penghitung `/profiles/{id}/usage`
+  juga tidak bergerak untuk panggilan API. Satu-satunya bukti kuat adalah daftar resmi server. Maka klien memvalidasi
+  `TTS_VOICE` ke daftar itu dan gagal cepat (`resolve_voice`), termasuk di `/status`.
+- **Temuan: salinan kredensial OAuth host rapuh.** Refresh token yang sama dipakai host dan container. Host memperbarui
+  token; percobaan refresh di container gagal dan menolak semua panggilan (bot berhenti menjawab). Terlihat dari
+  `refreshTokenExpiresAt` yang identik di kedua sisi. Pemulihan cepat: salin ulang; perbaikan tahan lama: login
+  terpisah di container atau API key. Gejala "OAuth session expired" di Telegram adalah bukti, bukan bug bot.
+- **Temuan: Claude mengarang footer** akun. Kini dilarang di instruksi.
+- **Kelalaian proses (dicatat agar tidak berulang):** saat menulis dokumentasi saya hampir menaruh password tunnel
+  pemilik secara harfiah ke repo publik; dicegah oleh pengaman otomatis. Aturan: dokumentasi menyebut "password
+  tunnel", tidak pernah nilainya; pemindaian kebocoran membaca nilai dari `.env` saat dijalankan, bukan diketik.

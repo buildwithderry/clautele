@@ -10,6 +10,7 @@ lain); ukuran respons dibatasi; isi balasan diperiksa benar-benar audio; kredens
 from __future__ import annotations
 
 import base64
+import dataclasses
 import json
 import os
 import subprocess
@@ -148,6 +149,46 @@ def synthesize(cfg: TtsConfig, text: str) -> bytes:
     return raw
 
 
+def list_voices(cfg: TtsConfig, timeout: int = 15) -> list[dict] | None:
+    """Daftar suara dari GET /v1/audio/voices, atau None bila server tidak menyediakannya."""
+    try:
+        _, raw, _ = _request(cfg, "GET", "/v1/audio/voices", timeout=timeout)
+        data = json.loads(raw)
+    except (TtsError, ValueError):
+        return None
+    items = data.get("voices", data.get("data")) if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        return None
+    out: list[dict] = []
+    for v in items:
+        if isinstance(v, str):
+            out.append({"id": v, "name": v, "type": ""})
+        elif isinstance(v, dict):
+            vid = v.get("voice_id") or v.get("id") or v.get("name")
+            if vid:
+                out.append({"id": str(vid), "name": str(v.get("name") or vid), "type": str(v.get("type") or "")})
+    return out or None
+
+
+def resolve_voice(cfg: TtsConfig) -> TtsConfig:
+    """Pastikan TTS_VOICE ada di server. VoiceStudio TIDAK menolak nama suara yang salah: ia diam-diam memakai suara
+    bawaan, sehingga user mengira memakai suara klonnya. Nama lengkap yang unik diubah menjadi id-nya."""
+    voices = list_voices(cfg)
+    if voices is None:  # server tanpa daftar suara: percaya konfigurasi
+        return cfg
+    want = cfg.voice.strip().lower()
+    if any(v["id"].lower() == want for v in voices):
+        return cfg
+    named = [v for v in voices if v["name"].lower() == want]
+    if len(named) == 1:
+        return dataclasses.replace(cfg, voice=named[0]["id"])
+    avail = ", ".join(f"{v['name']} (id {v['id']})" for v in voices if v["type"] != "openai_alias")
+    raise TtsError(
+        f"suara '{cfg.voice}' tidak ada di server (server akan DIAM-DIAM memakai suara bawaan). "
+        f"Isi TTS_VOICE dengan id suara. Tersedia: {avail[:500] or 'hanya suara bawaan'}"
+    )
+
+
 def health(cfg: TtsConfig, timeout: int = 6) -> tuple[bool, str]:
     try:
         status, _, _ = _request(cfg, "GET", "/health", timeout=timeout)
@@ -189,6 +230,12 @@ def probe(cfg: TtsConfig, out=print) -> int:
             out(f"   {p}")
     except (TtsError, ValueError) as exc:
         out(f"/openapi.json: {exc}")
+    try:
+        resolved = resolve_voice(cfg)
+        out(f"suara  : OK ('{cfg.voice}' -> id {resolved.voice})" if resolved.voice != cfg.voice else f"suara  : OK ('{cfg.voice}' ada di server)")
+    except TtsError as exc:
+        out(f"suara  : PERINGATAN: {exc}")
+        return 1
     try:
         data = synthesize(cfg, "Halo, ini tes suara dari Clautele.")
         with tempfile.NamedTemporaryFile(suffix=".wav") as f:

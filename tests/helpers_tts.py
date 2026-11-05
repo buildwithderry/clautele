@@ -55,6 +55,15 @@ class Server:
                     return self._send(200, b'{"status":"ok"}', "application/json")
                 if self.path in ("/engines", "/models"):
                     return self._send(200, b'[{"id":"omni-tts"}]', "application/json")
+                if self.path == "/v1/audio/voices":
+                    if m == "novoices":
+                        return self._send(404, b"nope", "text/plain")
+                    voices = [
+                        {"voice_id": "alloy", "name": "Alloy", "type": "openai_alias"},
+                        {"voice_id": "abc12345", "name": "HyVay adult_1", "type": "profile"},
+                        {"voice_id": "adult", "name": "Adult Sendiri", "type": "profile"},
+                    ]
+                    return self._send(200, json.dumps({"voices": voices}).encode(), "application/json")
                 if self.path == "/openapi.json":
                     paths = {"/v1/audio/speech": {}, "/voices/profiles": {}, "/system/admin": {}, "/health": {}}
                     return self._send(200, json.dumps({"paths": paths}).encode(), "application/json")

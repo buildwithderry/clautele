@@ -6,7 +6,10 @@ bisa terjadi di versi minor dan akan ditandai **BREAKING**.
 
 ## [Belum dirilis]
 
-> Belum divalidasi terhadap VoiceStudio yang sebenarnya (hanya server tiruan); tag versi menunggu uji nyata.
+## [0.6.0] - 2026-11-06
+
+> Divalidasi terhadap VoiceStudio asli (lewat ngrok) dengan suara klon, Claude asli, dan kode bot: video neon 29 detik
+> bernarasi terkirim sebagai video (audio AAC -22 dB rata-rata).
 
 ### Ditambahkan
 - **Narasi suara (TTS)** lewat endpoint kompatibel OpenAI (`POST /v1/audio/speech`), mis. VoiceStudio di komputer
@@ -18,9 +21,13 @@ bisa terjadi di versi minor dan akan ditandai **BREAKING**.
   mencetak kredensial.
 - Kolom `narration` per scene di `clautele-video`: semua narasi disintesis lebih dulu (gagal cepat sebelum render),
   durasi scene menyesuaikan panjang suara, scene tanpa narasi mendapat audio hening agar segmen seragam.
-- `/status` menampilkan apakah TTS terjangkau.
+- `/status` menampilkan apakah TTS terjangkau dan apakah suara yang dipilih ada di server.
+- **Validasi suara:** VoiceStudio tidak menolak nama suara yang salah, ia diam-diam memakai suara bawaan (terverifikasi:
+  nama ngawur tetap "OK"). Klien memeriksa `TTS_VOICE` ke `GET /v1/audio/voices` dan menolak dengan daftar suara yang
+  tersedia; nama lengkap yang unik diubah menjadi id-nya. Dipakai oleh `clautele-video`, `--probe`, dan `/status`.
 
 ### Diperbaiki
+- Claude mengarang footer video (mis. akun yang bisa milik orang lain); kini footer hanya dari yang disebut user.
 - Musik latar yang lebih pendek dari video **memotong video**; kini diulang (`-stream_loop`). Dengan narasi, musik
   dikecilkan di bawah suara.
 - Pembaca `.env` bawaan memakai nilai pertama untuk kunci duplikat, sedangkan docker compose memakai yang terakhir;
@@ -30,6 +37,10 @@ bisa terjadi di versi minor dan akan ditandai **BREAKING**.
 - `CLAUDE_ALLOWED_TOOLS=*` **tidak** membuka semua izin (diuji: `ffmpeg` tetap ditolak); gunakan pola seperti
   `Bash(ffmpeg *)`.
 - Kredensial TTS ada di environment container dan karena itu dapat dibaca proses yang dijalankan Claude.
+- Menyalin `~/.claude/.credentials.json` dari host ke `claude-config/` memakai **refresh token yang sama** di dua tempat.
+  Begitu salah satu memperbarui token, yang lain gagal dengan "OAuth session expired and could not be refreshed" dan bot
+  berhenti menjawab. Login terpisah di dalam container (`docker compose exec -it clautele claude`, lalu `/login`)
+  atau `ANTHROPIC_API_KEY` menghindarinya.
 
 ## [0.5.1] - 2026-11-06
 
@@ -136,7 +147,8 @@ bisa terjadi di versi minor dan akan ditandai **BREAKING**.
 - Docker multi-stage (test + runtime non-root), `docker-compose.yml`, `.env.example`.
 - Dokumentasi PARA di `docs/`.
 
-[Belum dirilis]: https://github.com/buildwithderry/clautele/compare/v0.5.1...HEAD
+[Belum dirilis]: https://github.com/buildwithderry/clautele/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/buildwithderry/clautele/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/buildwithderry/clautele/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/buildwithderry/clautele/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/buildwithderry/clautele/compare/v0.3.0...v0.4.0

@@ -9,15 +9,17 @@
 - [x] Docker multi-stage, compose, `.env.example`
 - [x] Mode host: `deploy/install-host.sh` + template service (ditulis, **belum dipasang**, lihat bawah)
 - [x] Sesi otomatis direset saat instruksi berubah; ffprobe diizinkan; aturan 'pakai ffmpeg' (v0.5.1)
+- [x] Narasi suara klon via VoiceStudio (tervalidasi nyata) + validasi nama suara (v0.6.0)
 - [x] `clautele-video` renderer neon + aturan video=MP4 (v0.5.0)
 - [x] Video: kirim streaming, buat/edit dengan ffmpeg, izin per perintah (v0.4.0)
 - [x] Kirim/terima file, foto, dokumen (v0.3.0)
 - [x] 2FA TOTP (`/login`, `/logout`), wajib di mode host
-- [x] 150 test otomatis (RFC 6238, kabur lewat symlink/path traversal, izin granular, video nyata dengan teks 'bermusuhan')
+- [x] 192 test otomatis (RFC 6238, kabur lewat symlink/path traversal, izin granular, video nyata dengan teks 'bermusuhan')
 - [x] Smoke test: Claude Code di container berhasil autentikasi dengan kredensial yang di-mount
 
 ## Belum
-- [ ] **Validasi TTS terhadap VoiceStudio asli**: isi `TTS_BASIC_AUTH` di `.env`, jalankan `--probe`, uji suara kloning 'adult', lalu beri tag versi
+- [ ] Login Claude terpisah di container (hindari OAuth bersama host yang rapuh) atau pakai API key
+- [ ] Ganti password tunnel dengan yang acak panjang (yang sekarang lemah dan sudah tertulis di chat) dan batasi path lewat Traffic Policy ngrok
 - [ ] Pengetatan tunnel: password acak + allowlist path (`/health`, `/v1/audio/speech`, `/v1/audio/transcriptions`)
 - [ ] Transkripsi pesan suara lewat `/v1/audio/transcriptions` (menggantikan rencana Whisper di VPS)
 - [ ] Pasang service host: ditolak pengaman Claude Code ("Unauthorized Persistence"); pemilik harus menjalankan sendiri: (1) `python -m clautele.totp` di terminal pribadi, isi `TOTP_SECRET` di `.env`; (2) `docker compose stop clautele && bash deploy/install-host.sh`

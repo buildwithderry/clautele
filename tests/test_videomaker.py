@@ -280,3 +280,16 @@ def test_narration_plus_music_mixed(tmp_path, monkeypatch, tts_srv):
     vm.render(sp, tmp_path / "o.mp4", tts_cfg=tts_cfg(tts_srv), log=lambda m: None)
     st, dur = streams(tmp_path / "o.mp4")
     assert "audio" in st and abs(dur - (0.4 + 1.0 + 0.6 + 2)) < 0.4  # musik 1 detik diulang menutup seluruh video
+
+
+@needs_ffmpeg
+def test_unknown_voice_aborts_before_any_synthesis(tmp_path, monkeypatch, tts_srv, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TTS_BASE_URL", tts_srv.url)
+    monkeypatch.setenv("TTS_BASIC_AUTH", f"u:{SECRET}")
+    monkeypatch.setenv("TTS_VOICE", "suara-tidak-ada")
+    spec_file(tmp_path, [{"title": "A", "narration": "Halo", "duration": 1}])
+    assert vm.main(["s.json", "o.mp4"]) == 1
+    assert "DIAM-DIAM" in capsys.readouterr().err
+    assert not [r for r in tts_srv.requests if r["path"] == "/v1/audio/speech"]  # tak ada sintesis dengan suara bawaan
+    assert not (tmp_path / "o.mp4").exists()

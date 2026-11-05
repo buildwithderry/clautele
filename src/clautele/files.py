@@ -147,6 +147,7 @@ def video_system_prompt(outbox: Path, inbox: Path, max_mb: int, has_maker: bool 
         '"scenes":[{"label":"01","title":"JUDUL","body":"isi singkat","color":"cyan|magenta|green|yellow|orange|red|blue|purple|white|#RRGGBB","duration":4}]}. '
         "Maks 40 scene dan 180 detik. Pecah materi jadi scene pendek: judul <= 6 kata, isi <= 2 kalimat, 3-5 detik. "
         "Gunakan story (9:16) untuk Instagram Reels/Story, portrait untuk feed. Jalankan `clautele-video --help` bila ragu. "
+        "Isi footer HANYA dengan akun/teks yang disebut user; jangan mengarang nama akun (bisa milik orang lain). "
         "Perintah ini mengizinkan dirinya sendiri; rendernya memakan waktu sekitar 3-4x durasi video, jadi jangan membuat video lebih panjang dari yang diminta. "
         "WAJIB pakai clautele-video untuk setiap video baru berbasis teks/slide/animasi teks, TERMASUK saat user menulis "
         "\"pakai ffmpeg\" atau \"dengan ffmpeg\": clautele-video sudah memakai ffmpeg di dalamnya, dan itu jalur yang tidak "

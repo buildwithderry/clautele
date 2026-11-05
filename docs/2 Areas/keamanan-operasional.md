@@ -23,6 +23,15 @@
 - [ ] Tinjau `/status` → "Izin tambahan"; `/end_claude` menghapusnya
 - [ ] Jangan menaruh executable berbahaya (python, bash, curl) di `CLAUDE_ALLOWED_TOOLS` permanen
 
+## Tunnel TTS (VoiceStudio di komputer sendiri)
+- [ ] Password tunnel acak panjang (bukan nama sendiri); tidak pernah ditempel ke chat atau ke repo
+- [ ] Traffic Policy hanya meneruskan `/health`, `/v1/audio/speech`, `/v1/audio/voices`, `/v1/audio/transcriptions`
+- [ ] Uji berkala: permintaan tanpa kredensial dari luar harus 401
+- [ ] Ingat: kredensial TTS berada di environment container dan bisa dibaca proses Claude
+
+## Kredensial Claude
+- [ ] Jangan berbagi refresh token OAuth antara host dan container; login terpisah atau API key
+
 ## File keluar
 - [ ] `SEND_ROOTS` kosong atau sempit; jangan menunjuk ke folder berisi file konfigurasi proyek lain
 - [ ] `ls <workdir>/.clautele/outbox` sesekali: bersihkan file lama
