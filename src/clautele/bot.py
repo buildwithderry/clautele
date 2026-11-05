@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import shutil
 import time
@@ -318,6 +319,20 @@ class ClauteleBot:
             return
         state = self.store.get(chat_id)
         state.last_prompt = prompt
+        # `--append-system-prompt` hanya berlaku pada giliran PERTAMA sesi; saat --resume, instruksi lama tetap
+        # dipakai dan yang baru diabaikan (terverifikasi di claude 2.1.318). Maka sesi lama tidak akan pernah
+        # melihat fitur/aturan baru. Bila instruksi berubah, mulai sesi baru dan beri tahu user.
+        digest = hashlib.sha256(self._compose_prompt()[0].encode()).hexdigest()[:12]
+        if state.session_id and state.prompt_hash != digest:
+            log.info("Instruksi berubah (%s -> %s); memulai sesi baru", state.prompt_hash, digest)
+            state.session_id = None
+            state.turns = 0
+            await ctx.bot.send_message(
+                chat_id,
+                "🔄 Instruksi bot sudah diperbarui sejak percakapan ini dimulai (mis. fitur video baru), jadi saya "
+                "memulai percakapan baru agar semuanya berfungsi. Konteks lama tidak dibawa.",
+            )
+        state.prompt_hash = digest
         progress = _Progress(ctx.bot, chat_id, enabled=self.cfg.stream_progress)
         await progress.start()
         typing = asyncio.create_task(_typing_loop(ctx.bot, chat_id))
@@ -360,14 +375,18 @@ class ClauteleBot:
         await progress.finish(footer)
         await self._deliver(ctx, chat_id, result)
 
-    async def _execute(
-        self, chat_id: int, prompt: str, progress: "_Progress", *, allow_retry: bool
-    ) -> RunResult:
-        state = self.store.get(chat_id)
+    def _compose_prompt(self) -> tuple[str, list[str]]:
+        """Instruksi sistem lengkap + izin bawaan. Dipakai untuk menjalankan Claude dan untuk sidik jari sesi."""
         cfg = self.cfg
         # clautele-video adalah alat bawaan kita (output dibatasi ke folder kerja), jadi diizinkan otomatis.
         has_maker = bool(shutil.which("ffmpeg") and shutil.which("clautele-video"))
-        builtin_tools = ["Bash(clautele-video *)"] if has_maker and cfg.send_files else []
+        # ffprobe hanya membaca metadata; Claude memakainya untuk memeriksa hasil render. Tanpa izin ini, perintah
+        # berantai seperti `clautele-video ... && ffprobe ...` ditolak seluruhnya (izin diperiksa per bagian).
+        builtin_tools = (
+            ["Bash(clautele-video *)", *(["Bash(ffprobe *)"] if shutil.which("ffprobe") else [])]
+            if has_maker and cfg.send_files
+            else []
+        )
         parts = [cfg.append_system_prompt, SYSTEM_PROMPT]
         if cfg.send_files:
             parts.append(files_system_prompt(cfg.outbox_dir, cfg.inbox_dir, cfg.send_max_mb))
@@ -375,7 +394,14 @@ class ClauteleBot:
                 parts.append(
                     video_system_prompt(cfg.outbox_dir, cfg.inbox_dir, cfg.send_max_mb, has_maker=has_maker)
                 )
-        full_cfg_prompt = "\n\n".join(p for p in parts if p)
+        return "\n\n".join(p for p in parts if p), builtin_tools
+
+    async def _execute(
+        self, chat_id: int, prompt: str, progress: "_Progress", *, allow_retry: bool
+    ) -> RunResult:
+        state = self.store.get(chat_id)
+        full_cfg_prompt, builtin_tools = self._compose_prompt()
+        cfg = self.cfg
         cfg = replace(cfg, append_system_prompt=full_cfg_prompt)
         args = build_args(
             cfg,

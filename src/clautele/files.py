@@ -139,13 +139,19 @@ def video_system_prompt(outbox: Path, inbox: Path, max_mb: int, has_maker: bool 
     maker = (
         "Untuk video bergaya slide/teks neon (konten Instagram, penjelasan poin demi poin, promo, ajakan komentar): "
         f"tulis spec JSON dengan tool Write (JANGAN heredoc/cat lewat Bash), lalu jalankan `clautele-video spec.json {outbox}/nama.mp4` "
-        "dengan Bash timeout 600000 (render bisa beberapa menit). "
+        "dengan Bash timeout 600000 (render bisa beberapa menit). Jalankan clautele-video SENDIRIAN sebagai satu perintah Bash: "
+        "jangan digabung dengan &&, ;, atau | (perintah berantai ditolak seluruhnya bila salah satu bagiannya belum diizinkan). "
+        "Periksa hasil dengan perintah TERPISAH, mis. `ffprobe -v error -show_entries format=duration -of compact hasil.mp4` "
+        "(ffprobe diizinkan otomatis). "
         'Spec: {"size":"story|square|portrait|landscape|WxH","fps":30,"footer":"@akun","audio":"musik.mp3 (opsional)",'
         '"scenes":[{"label":"01","title":"JUDUL","body":"isi singkat","color":"cyan|magenta|green|yellow|orange|red|blue|purple|white|#RRGGBB","duration":4}]}. '
         "Maks 40 scene dan 180 detik. Pecah materi jadi scene pendek: judul <= 6 kata, isi <= 2 kalimat, 3-5 detik. "
         "Gunakan story (9:16) untuk Instagram Reels/Story, portrait untuk feed. Jalankan `clautele-video --help` bila ragu. "
         "Perintah ini mengizinkan dirinya sendiri; rendernya memakan waktu sekitar 3-4x durasi video, jadi jangan membuat video lebih panjang dari yang diminta. "
-        "Untuk efek lain atau mengedit video yang sudah ada, pakai ffmpeg langsung. "
+        "WAJIB pakai clautele-video untuk setiap video baru berbasis teks/slide/animasi teks, TERMASUK saat user menulis "
+        "\"pakai ffmpeg\" atau \"dengan ffmpeg\": clautele-video sudah memakai ffmpeg di dalamnya, dan itu jalur yang tidak "
+        "butuh izin. Panggil ffmpeg langsung hanya untuk mengedit video/gambar milik user (potong, gabung, kompres, ambil "
+        "frame) atau efek yang jelas tidak bisa dibuat clautele-video. "
         if has_maker
         else ""
     )

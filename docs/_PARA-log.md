@@ -11,3 +11,4 @@
 | 2026-11-06 | keputusan-desain.md, checklist-proyek.md, keamanan-operasional.md, rilis-dan-versioning.md | (revisi) | tetap di lokasi | Keputusan #8 file masuk/keluar, rilis v0.3.0 |
 | 2026-11-06 | keputusan-desain.md, checklist-proyek.md, keamanan-operasional.md, rilis-dan-versioning.md | (revisi) | tetap di lokasi | Keputusan #9 video + izin granular, rilis v0.4.0 |
 | 2026-11-06 | keputusan-desain.md, checklist-proyek.md, rilis-dan-versioning.md | (revisi) | tetap di lokasi | Keputusan #10 clautele-video, rilis v0.5.0 |
+| 2026-11-06 | keputusan-desain.md, checklist-proyek.md, rilis-dan-versioning.md | (revisi) | tetap di lokasi | Keputusan #11 instruksi terkunci per sesi, rilis v0.5.1 |

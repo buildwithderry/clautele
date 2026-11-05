@@ -20,6 +20,7 @@ class ChatState:
     active: bool = False  # sesi Claude aktif? diatur lewat /start_claude dan /end_claude
     granted_tools: list = field(default_factory=list)  # tool yang diizinkan user lewat tombol
     last_prompt: str | None = None  # untuk "Izinkan & ulangi"
+    prompt_hash: str | None = None  # sidik jari instruksi sistem saat sesi dibuat (lihat bot._compose_prompt)
 
 
 class StateStore:

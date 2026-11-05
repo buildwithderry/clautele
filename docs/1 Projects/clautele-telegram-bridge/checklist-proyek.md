@@ -8,11 +8,12 @@
 - [x] Tombol izinkan tool yang ditolak
 - [x] Docker multi-stage, compose, `.env.example`
 - [x] Mode host: `deploy/install-host.sh` + template service (ditulis, **belum dipasang**, lihat bawah)
+- [x] Sesi otomatis direset saat instruksi berubah; ffprobe diizinkan; aturan 'pakai ffmpeg' (v0.5.1)
 - [x] `clautele-video` renderer neon + aturan video=MP4 (v0.5.0)
 - [x] Video: kirim streaming, buat/edit dengan ffmpeg, izin per perintah (v0.4.0)
 - [x] Kirim/terima file, foto, dokumen (v0.3.0)
 - [x] 2FA TOTP (`/login`, `/logout`), wajib di mode host
-- [x] 145 test otomatis (RFC 6238, kabur lewat symlink/path traversal, izin granular, video nyata dengan teks 'bermusuhan')
+- [x] 150 test otomatis (RFC 6238, kabur lewat symlink/path traversal, izin granular, video nyata dengan teks 'bermusuhan')
 - [x] Smoke test: Claude Code di container berhasil autentikasi dengan kredensial yang di-mount
 
 ## Belum
@@ -21,6 +22,7 @@
 - [ ] Uji langsung dengan token bot Telegram asli (butuh token dari pemilik)
 - [ ] v0.6.0: transkripsi suara + subtitle otomatis (faster-whisper, opsional lewat build arg)
 - [ ] Bot API server lokal agar batas unduh 20 MB naik (video besar dari user)
+- [ ] Izin sinkron lewat `--permission-prompt-tool` (MCP) agar tidak perlu menyuruh Claude mengulang
 - [ ] Gaya video selain neon (tema di spec)
 - [ ] Varian image dengan Remotion (jika dibutuhkan; periksa lisensi)
 - [ ] Server MCP `ask_user` untuk pertanyaan sinkron

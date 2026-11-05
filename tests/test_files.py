@@ -151,7 +151,7 @@ def test_video_prompt_content(ws):
 
 def test_video_prompt_forbids_html_and_names_tool(ws):
     with_maker = video_system_prompt(ws / "out", ws / "in", 50, has_maker=True)
-    for needle in ("DILARANG", "HTML", "MP4", "clautele-video spec.json", "story", "jangan beralih ke format lain", "JANGAN heredoc", "timeout 600000"):
+    for needle in ("DILARANG", "HTML", "MP4", "clautele-video spec.json", "story", "jangan beralih ke format lain", "JANGAN heredoc", "timeout 600000", "SENDIRIAN", "TERPISAH", "WAJIB pakai clautele-video", "pakai ffmpeg"):
         assert needle in with_maker, needle
     without = video_system_prompt(ws / "out", ws / "in", 50, has_maker=False)
     assert "DILARANG" in without and "clautele-video" not in without  # larangan HTML tetap ada

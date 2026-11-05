@@ -27,7 +27,11 @@ SYSTEM_PROMPT = (
     '<<ASK>>{"question": "pertanyaan singkat", "options": ["opsi 1", "opsi 2"]}<<END>> '
     "Maksimal 6 opsi, tiap opsi pendek. User bisa memilih opsi atau mengetik jawaban bebas. "
     "Setelah menaruh penanda, berhenti dan tunggu jawaban. Jangan memakai penanda untuk "
-    "sekadar basa-basi. Jawab dalam bahasa yang dipakai user."
+    "sekadar basa-basi. Jawab dalam bahasa yang dipakai user. "
+    "Izin: bot berjalan tanpa terminal, jadi perintah yang butuh izin ditolak otomatis dan user bisa menyetujuinya "
+    "lewat tombol. Penolakan hanya berlaku untuk perintah ITU, bukan seluruh sesi: jangan menyimpulkan bahwa Bash "
+    "tidak bisa dipakai. Perintah lain mungkin sudah diizinkan, jadi tetap coba, dan jangan mengganti permintaan "
+    "user dengan skrip yang harus dijalankan sendiri oleh user."
 )
 
 

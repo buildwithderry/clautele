@@ -16,6 +16,12 @@
 5. `git push origin main --follow-tags` (atau `git push origin vX.Y.Z`).
 6. Opsional: buat GitHub Release dari tag, tempel bagian CHANGELOG-nya.
 
+## Checklist uji sebelum rilis fitur yang mengubah perilaku Claude
+- [ ] Uji dengan sesi BARU **dan** dengan state sesi lama (salin `state.json` dari container, jalankan lewat harness)
+- [ ] Pakai kata-kata persis dari laporan pengguna, bukan prompt rancangan sendiri
+- [ ] Ekstrak dan lihat frame/keluaran, jangan hanya mengandalkan test yang lolos
+- [ ] Ingat: `--append-system-prompt` tidak berlaku saat `--resume` (lihat keputusan #11)
+
 ## Aturan tag
 - Selalu `vMAJOR.MINOR.PATCH` dan **beranotasi** (`-a`), supaya `git describe` dan GitHub menampilkan pesan.
 - Tag tidak dipindah atau dihapus setelah dipush. Salah rilis → terbitkan PATCH baru.
@@ -24,6 +30,7 @@
 | Tag | Commit | Isi |
 |---|---|---|
 | v0.1.0 | 53f75b5 | Bot Telegram + Docker + dokumentasi PARA |
+| v0.5.1 | (lihat `git show v0.5.1`) | Reset sesi otomatis saat instruksi berubah, ffprobe, aturan ffmpeg |
 | v0.5.0 | (lihat `git show v0.5.0`) | `clautele-video` neon, perbaikan "video dijawab HTML" |
 | v0.4.0 | (lihat `git show v0.4.0`) | Video (kirim, buat, edit), izin per perintah |
 | v0.3.0 | (lihat `git show v0.3.0`) | Kirim/terima file, foto, dokumen |

@@ -496,12 +496,13 @@ print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "se
 
 
 async def test_video_maker_auto_allowed_only_when_installed(tmp_path, monkeypatch):
-    have = {"ffmpeg": "/usr/bin/ffmpeg", "clautele-video": "/usr/local/bin/clautele-video"}
+    have = {"ffmpeg": "/usr/bin/ffmpeg", "ffprobe": "/usr/bin/ffprobe", "clautele-video": "/usr/local/bin/clautele-video"}
     monkeypatch.setattr("clautele.bot.shutil.which", lambda n: have.get(n))
     bot, ctx, _ = make(tmp_path, ALLOWED_CLAUDE)
     await bot.run_prompt(ctx, 1, "buat video")
     out = " ".join(m.text for m in ctx.bot.sent)
-    assert "Bash(clautele-video *)" in out.split("|SP:")[0]  # diizinkan otomatis
+    tools = out.split("|SP:")[0]
+    assert "Bash(clautele-video *)" in tools and "Bash(ffprobe *)" in tools  # diizinkan otomatis
     assert "clautele-video spec.json" in out and "DILARANG" in out  # panduan masuk prompt
 
     (tmp_path / "b").mkdir()
@@ -518,3 +519,72 @@ async def test_video_maker_not_allowed_when_file_sending_disabled(tmp_path, monk
     bot, ctx, _ = make(tmp_path, ALLOWED_CLAUDE, {"SEND_FILES": "false"})
     await bot.run_prompt(ctx, 1, "x")
     assert "Bash(clautele-video *)" not in " ".join(m.text for m in ctx.bot.sent)
+
+
+# ---------- instruksi sistem hanya berlaku di giliran pertama sesi ----------
+
+RESUME_CLAUDE = """
+import json, sys
+sys.stdin.read()
+a = sys.argv
+rs = a[a.index("--resume") + 1] if "--resume" in a else "none"
+print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": "R1", "result": "RESUME:" + rs}), flush=True)
+"""
+NOTICE = "Instruksi bot sudah diperbarui"
+
+
+def _texts(ctx):
+    return " ".join(m.text for m in ctx.bot.sent)
+
+
+async def test_session_resumed_when_instructions_unchanged(tmp_path, monkeypatch):
+    monkeypatch.setattr("clautele.bot.shutil.which", lambda n: None)
+    bot, ctx, store = make(tmp_path, RESUME_CLAUDE)
+    await bot.run_prompt(ctx, 1, "pertama")
+    assert "RESUME:none" in _texts(ctx)
+    await bot.run_prompt(ctx, 1, "kedua")
+    assert "RESUME:R1" in _texts(ctx) and NOTICE not in _texts(ctx)  # konteks terjaga
+
+
+async def test_session_restarted_when_instructions_change(tmp_path, monkeypatch):
+    # contoh nyata: ffmpeg baru terpasang -> panduan video muncul -> sesi lama tidak akan pernah melihatnya
+    monkeypatch.setattr("clautele.bot.shutil.which", lambda n: None)
+    bot, ctx, store = make(tmp_path, RESUME_CLAUDE)
+    await bot.run_prompt(ctx, 1, "pertama")
+    assert store.get(1).session_id == "R1"
+
+    monkeypatch.setattr("clautele.bot.shutil.which", lambda n: "/usr/bin/" + n)
+    ctx.bot.sent.clear()
+    await bot.run_prompt(ctx, 1, "kedua")
+    assert NOTICE in _texts(ctx)
+    assert "RESUME:none" in _texts(ctx)  # tidak --resume: sesi baru memakai instruksi baru
+    assert not any("RESUME:R1" in m.text for m in ctx.bot.sent)
+
+    ctx.bot.sent.clear()
+    await bot.run_prompt(ctx, 1, "ketiga")  # instruksi sudah stabil lagi -> lanjut normal
+    assert "RESUME:R1" in _texts(ctx) and NOTICE not in _texts(ctx)
+
+
+async def test_legacy_session_without_hash_is_restarted(tmp_path, monkeypatch):
+    monkeypatch.setattr("clautele.bot.shutil.which", lambda n: None)
+    bot, ctx, store = make(tmp_path, RESUME_CLAUDE)
+    st = store.get(1)
+    st.session_id, st.prompt_hash, st.turns = "SESI-LAMA", None, 7  # sesi dari versi sebelum fitur ini
+    await bot.run_prompt(ctx, 1, "halo")
+    assert NOTICE in _texts(ctx) and "RESUME:none" in _texts(ctx) and "SESI-LAMA" not in _texts(ctx)
+    assert store.get(1).prompt_hash is not None
+
+
+def test_system_prompt_says_denial_is_per_command():
+    from clautele.asks import SYSTEM_PROMPT
+
+    assert "bukan seluruh sesi" in SYSTEM_PROMPT and "tidak bisa dipakai" in SYSTEM_PROMPT
+
+
+async def test_ffprobe_rule_only_added_when_ffprobe_exists(tmp_path, monkeypatch):
+    have = {"ffmpeg": "/usr/bin/ffmpeg", "clautele-video": "/usr/local/bin/clautele-video"}
+    monkeypatch.setattr("clautele.bot.shutil.which", lambda n: have.get(n))
+    bot, ctx, _ = make(tmp_path, ALLOWED_CLAUDE)
+    await bot.run_prompt(ctx, 1, "x")
+    tools = " ".join(m.text for m in ctx.bot.sent).split("|SP:")[0]
+    assert "Bash(clautele-video *)" in tools and "ffprobe" not in tools

@@ -111,3 +111,25 @@ Laporan: diminta "animasi video neon untuk Instagram", Claude menulis file HTML 
 - **Uji end-to-end:** permintaan yang sama persis lewat kode bot + Claude asli menghasilkan MP4 73 detik, 17 scene,
   dikirim sebagai video, 262 detik total, tanpa HTML.
 - **Batas:** hanya gaya neon; font DejaVu (tanpa emoji); tidak ada animasi gerak objek selain fade/slide teks.
+
+## 11. Instruksi sistem terkunci per sesi (v0.5.1)
+Laporan: setelah v0.5.0, video tetap dijawab dengan skrip `.sh` dan Claude bilang "Bash ditolak di sesi ini".
+- **Diagnosis (berurutan, tiap langkah diverifikasi):** (1) riwayat sesi menunjukkan hanya satu percobaan Bash, ditolak,
+  lalu tidak pernah dicoba lagi; (2) tes `--resume --fork-session` dengan kode rahasia di `--append-system-prompt`:
+  Claude tidak melihat kodenya; (3) eksperimen bersih: kode A di giliran 1 tetap ada di giliran 2 dan 3, kode B baru di
+  giliran 2 **tidak pernah muncul**. Kesimpulan: pada `--resume`, instruksi sistem giliran pertama dipakai terus dan
+  `--append-system-prompt` berikutnya diabaikan. Ini berlaku untuk SEMUA fitur kita (ASK, FILE, video), bukan hanya video.
+- **Dampak:** setiap pembaruan bot tidak menjangkau percakapan yang sudah berjalan; pengguna melihatnya sebagai "fiturnya
+  tidak jalan" padahal kodenya benar. Jebakan ini sulit terlihat karena test dengan sesi baru selalu lolos.
+- **Keputusan:** simpan hash instruksi (`prompt_hash`) per chat. Beda hash dengan sesi berjalan → `session_id` dikosongkan,
+  percakapan baru, dan user diberi tahu. Menyuntikkan instruksi lewat pesan user (agar konteks terjaga) ditolak: bobotnya
+  lebih lemah dari instruksi sistem dan riwayat yang "teracuni" (penolakan izin dianggap berlaku sepanjang sesi) tetap ada.
+  Harga yang dibayar: konteks percakapan hilang saat bot diperbarui, disertai pemberitahuan.
+- **Dua temuan lanjutan dari replay dengan state asli pemilik + Claude asli:** (a) `clautele-video ... && ffprobe ...`
+  ditolak seluruhnya karena izin diperiksa per bagian → `ffprobe` (hanya baca metadata) diizinkan otomatis dan
+  instruksi menyuruh perintah terpisah; (b) "pakai ffmpeg" ditafsirkan harfiah → instruksi menegaskan `clautele-video`
+  wajib dan sudah memakai ffmpeg.
+- **Pelajaran untuk pengujian:** uji dengan *state yang sudah ada* (sesi lama) dan *kata-kata persis pengguna*, bukan hanya
+  sesi baru dengan prompt yang saya rancang. Tiga uji sebelumnya lolos karena memakai sesi baru.
+- **Tidak dilakukan:** `--permission-prompt-tool` (MCP) agar izin bisa disetujui sinkron di tengah giliran; lebih besar
+  dan belum perlu.

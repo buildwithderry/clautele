@@ -76,6 +76,12 @@ atau kirim video dengan keterangan *"potong menit 0:10–0:25 lalu kecilkan jadi
 - Image jadi sekitar 0,6 GB lebih besar. Tanpa video: `docker compose build --build-arg WITH_FFMPEG=false`.
 - Mode host: pasang sendiri (`sudo apt install ffmpeg fonts-dejavu-core`); panduan video baru aktif jika `ffmpeg` ada di PATH.
 
+## Percakapan dimulai ulang saat bot diperbarui
+
+Instruksi untuk Claude hanya dibaca pada giliran pertama sebuah sesi. Karena itu, setelah update bot atau perubahan
+`.env`, bot memulai percakapan baru secara otomatis dan memberi tahu Anda ("🔄 Instruksi bot sudah diperbarui…").
+Konteks lama tidak dibawa; riwayatnya tetap ada di `claude-config/`.
+
 ## Pilih tingkat akses
 
 Seberapa banyak yang boleh disentuh Claude ditentukan oleh cara Anda menjalankan bot.

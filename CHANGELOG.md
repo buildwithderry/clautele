@@ -6,6 +6,28 @@ bisa terjadi di versi minor dan akan ditandai **BREAKING**.
 
 ## [Belum dirilis]
 
+## [0.5.1] - 2026-11-06
+
+### Diperbaiki
+- **Fitur baru tidak berlaku pada percakapan yang sudah berjalan.** `claude --resume` memakai instruksi sistem dari
+  giliran *pertama* sesi dan mengabaikan `--append-system-prompt` yang baru (terverifikasi dengan eksperimen bersih).
+  Akibatnya sesi lama tidak pernah melihat aturan video, penanda file, dll., dan permintaan video tetap dijawab dengan
+  HTML atau skrip `.sh`. Kini bot menyimpan sidik jari instruksi per chat; bila berubah (update bot, `.env`, ffmpeg
+  baru terpasang), bot **memulai percakapan baru otomatis dan memberi tahu user**. Sesi dari versi lama (tanpa
+  sidik jari) juga direset sekali.
+- Perintah berantai `clautele-video ... && ffprobe ...` ditolak seluruhnya karena `ffprobe` belum diizinkan (izin
+  diperiksa per bagian). `ffprobe` (baca metadata saja) kini diizinkan otomatis bersama `clautele-video`, dan instruksi
+  menyuruh menjalankannya sebagai perintah terpisah.
+- Permintaan "pakai ffmpeg" membuat Claude memanggil ffmpeg mentah (butuh tombol izin) dan melewati `clautele-video`.
+  Instruksi kini menegaskan `clautele-video` wajib untuk video baru berbasis teks/slide, termasuk saat user menyebut
+  ffmpeg.
+- Penolakan izin untuk satu perintah dianggap Claude berlaku untuk seluruh sesi ("Bash tidak bisa dipakai"). Instruksi
+  kini menyatakan penolakan hanya berlaku untuk perintah itu.
+
+### Catatan
+- Mengubah instruksi sistem berarti percakapan aktif dimulai ulang (konteks lama tidak dibawa). Itu disengaja dan
+  selalu disertai pemberitahuan.
+
 ## [0.5.0] - 2026-11-06
 
 ### Ditambahkan
@@ -89,7 +111,8 @@ bisa terjadi di versi minor dan akan ditandai **BREAKING**.
 - Docker multi-stage (test + runtime non-root), `docker-compose.yml`, `.env.example`.
 - Dokumentasi PARA di `docs/`.
 
-[Belum dirilis]: https://github.com/buildwithderry/clautele/compare/v0.5.0...HEAD
+[Belum dirilis]: https://github.com/buildwithderry/clautele/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/buildwithderry/clautele/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/buildwithderry/clautele/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/buildwithderry/clautele/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/buildwithderry/clautele/compare/v0.2.0...v0.3.0
