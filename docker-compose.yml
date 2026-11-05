@@ -1,0 +1,26 @@
+services:
+  clautele:
+    build:
+      context: .
+      target: runtime
+    image: clautele:latest
+    container_name: clautele
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      CLAUDE_WORKDIR: /workspace
+      DATA_DIR: /data
+      CLAUDE_CONFIG_DIR: /home/node/.claude
+    volumes:
+      # Folder kerja Claude (di host: WORKSPACE_DIR)
+      - ${WORKSPACE_DIR:-./workspace}:/workspace
+      # Config + kredensial + riwayat sesi Claude (agar /resume bertahan antar restart)
+      - ${CLAUDE_HOME_DIR:-./claude-config}:/home/node/.claude
+      # State bot (session id, mode, dll)
+      - clautele-data:/data
+    # Hanya outbound ke api.telegram.org dan api.anthropic.com; tidak ada port yang dibuka.
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  clautele-data:

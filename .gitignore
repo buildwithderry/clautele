@@ -1,0 +1,21 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# runtime
+workspace/
+claude-config/
+data/
+*.log
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# editor / OS
+.idea/
+.vscode/
+.DS_Store

@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+!.env.example
+workspace
+claude-config
+data
+docs
+.venv
+__pycache__
+.pytest_cache
+README.md

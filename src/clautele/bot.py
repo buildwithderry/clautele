@@ -1,0 +1,503 @@
+"""Handler Telegram: menghubungkan chat ke sesi Claude Code."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from dataclasses import replace
+from typing import Any
+
+from telegram import (
+    BotCommand,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
+from telegram.constants import ChatAction
+from telegram.error import BadRequest, TelegramError
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
+
+from . import __version__
+from .asks import SYSTEM_PROMPT, Question, button_label, extract_question
+from .config import VALID_MODES, Config
+from .runner import ClaudeRun, RunResult, assistant_blocks, build_args
+from .store import StateStore
+from .textutil import describe_tool_use, format_denials, split_message
+
+log = logging.getLogger("clautele")
+
+PROGRESS_LINES = 12
+EDIT_INTERVAL = 1.5  # detik; batas aman agar tidak kena flood limit Telegram
+
+HELP = (
+    "🤖 *Clautele*: ngobrol dengan Claude Code di server lewat Telegram\n\n"
+    "/start\\_claude: mulai sesi Claude\n"
+    "/end\\_claude: akhiri sesi (konteks dihapus)\n"
+    "/new: mulai percakapan baru, sesi tetap aktif\n"
+    "/stop: batalkan proses yang sedang berjalan\n"
+    "/status: info sesi, mode, model, biaya\n"
+    "/mode: ganti permission mode\n"
+    "/model `<nama>`: ganti model (kosong = default)\n"
+    "/id: tampilkan Telegram user ID Anda\n\n"
+    "Setelah /start\\_claude, kirim pesan biasa sebagai prompt. Kalau Claude bertanya, "
+    "pilih tombol *atau* ketik jawaban sendiri."
+)
+
+
+class ClauteleBot:
+    def __init__(self, cfg: Config, store: StateStore):
+        self.cfg = cfg
+        self.store = store
+        self.runs: dict[int, ClaudeRun] = {}
+
+    # ---------- util ----------
+
+    def _allowed(self, update: Update) -> bool:
+        user = update.effective_user
+        return bool(user and user.id in self.cfg.allowed_user_ids)
+
+    async def _deny(self, update: Update) -> None:
+        user = update.effective_user
+        uid = user.id if user else "?"
+        log.warning("Akses ditolak untuk user id %s", uid)
+        if update.effective_message:
+            await update.effective_message.reply_text(
+                f"⛔ Anda tidak diizinkan memakai bot ini. User ID Anda: {uid}"
+            )
+
+    # ---------- perintah ----------
+
+    async def cmd_help(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._allowed(update):
+            return await self._deny(update)
+        await update.effective_message.reply_markdown(HELP)
+
+    async def cmd_id(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        # Sengaja tanpa cek izin: dipakai untuk mengisi ALLOWED_USER_IDS.
+        user = update.effective_user
+        await update.effective_message.reply_text(f"User ID Anda: {user.id if user else '?'}")
+
+    async def cmd_start_claude(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._allowed(update):
+            return await self._deny(update)
+        chat_id = update.effective_chat.id
+        state = self.store.get(chat_id)
+        state.active = True
+        self.store.save()
+        resumed = "melanjutkan percakapan sebelumnya" if state.session_id else "percakapan baru"
+        await update.effective_message.reply_text(
+            f"✅ Sesi Claude aktif ({resumed}).\n"
+            f"Folder kerja: {self.cfg.workdir}\n"
+            f"Mode: {state.permission_mode or self.cfg.permission_mode}\n\n"
+            "Kirim pesan apa saja sebagai prompt."
+        )
+
+    async def cmd_end_claude(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._allowed(update):
+            return await self._deny(update)
+        chat_id = update.effective_chat.id
+        run = self.runs.get(chat_id)
+        if run:
+            run.cancel()
+        self.store.reset_session(chat_id)
+        state = self.store.get(chat_id)
+        state.active = False
+        state.granted_tools = []
+        self.store.save()
+        await update.effective_message.reply_text(
+            "🛑 Sesi Claude diakhiri dan konteks dihapus. /start_claude untuk mulai lagi."
+        )
+
+    async def cmd_new(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._allowed(update):
+            return await self._deny(update)
+        chat_id = update.effective_chat.id
+        if run := self.runs.get(chat_id):
+            run.cancel()
+        self.store.reset_session(chat_id)
+        await update.effective_message.reply_text("🆕 Percakapan baru dimulai.")
+
+    async def cmd_stop(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._allowed(update):
+            return await self._deny(update)
+        run = self.runs.get(update.effective_chat.id)
+        if run is None:
+            return await update.effective_message.reply_text("Tidak ada proses yang berjalan.")
+        run.cancel()
+        await update.effective_message.reply_text("⏹ Membatalkan proses…")
+
+    async def cmd_status(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._allowed(update):
+            return await self._deny(update)
+        chat_id = update.effective_chat.id
+        s = self.store.get(chat_id)
+        lines = [
+            f"Clautele v{__version__}",
+            f"Sesi: {'aktif' if s.active else 'tidak aktif'}"
+            + (" (sedang bekerja)" if chat_id in self.runs else ""),
+            f"Session ID: {s.session_id or '-'}",
+            f"Mode: {s.permission_mode or self.cfg.permission_mode}",
+            f"Model: {s.model or self.cfg.model or 'default'}",
+            f"Giliran: {s.turns} | Biaya sesi: ${s.total_cost_usd:.4f}",
+            f"Izin tambahan: {', '.join(s.granted_tools) or '-'}",
+            f"Folder kerja: {self.cfg.workdir}",
+        ]
+        await update.effective_message.reply_text("\n".join(lines))
+
+    async def cmd_mode(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._allowed(update):
+            return await self._deny(update)
+        s = self.store.get(update.effective_chat.id)
+        current = s.permission_mode or self.cfg.permission_mode
+        modes = [m for m in VALID_MODES if m != "bypassPermissions" or self.cfg.allow_bypass]
+        rows = [
+            [InlineKeyboardButton(("● " if m == current else "") + m, callback_data=f"mode:{m}")]
+            for m in modes
+        ]
+        await update.effective_message.reply_text(
+            f"Permission mode saat ini: {current}\nPilih mode baru:",
+            reply_markup=InlineKeyboardMarkup(rows),
+        )
+
+    async def cmd_model(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._allowed(update):
+            return await self._deny(update)
+        s = self.store.get(update.effective_chat.id)
+        s.model = " ".join(ctx.args).strip() or None
+        self.store.save()
+        await update.effective_message.reply_text(f"Model: {s.model or 'default'}")
+
+    # ---------- pesan & tombol ----------
+
+    async def on_text(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._allowed(update):
+            return await self._deny(update)
+        chat_id = update.effective_chat.id
+        if not self.store.get(chat_id).active:
+            return await update.effective_message.reply_text(
+                "Sesi Claude belum aktif. Kirim /start_claude dulu."
+            )
+        text = (update.effective_message.text or "").strip()
+        if text:
+            await self.run_prompt(ctx, chat_id, text)
+
+    async def on_callback(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        q = update.callback_query
+        if q is None or q.data is None:
+            return
+        if not self._allowed(update):
+            return await q.answer("Tidak diizinkan.", show_alert=True)
+        chat_id = q.message.chat_id
+        state = self.store.get(chat_id)
+        kind, _, value = q.data.partition(":")
+
+        if kind == "mode":
+            if value not in VALID_MODES or (value == "bypassPermissions" and not self.cfg.allow_bypass):
+                return await q.answer("Mode tidak valid.", show_alert=True)
+            state.permission_mode = value
+            self.store.save()
+            await q.answer(f"Mode: {value}")
+            await q.edit_message_text(f"Permission mode: {value}")
+
+        elif kind == "ask":
+            options: list[str] = ctx.chat_data.get("pending_options", [])
+            try:
+                choice = options[int(value)]
+            except (ValueError, IndexError):
+                return await q.answer("Pilihan kedaluwarsa, ketik jawabanmu.", show_alert=True)
+            if not state.active:
+                return await q.answer("Sesi tidak aktif. /start_claude", show_alert=True)
+            if chat_id in self.runs:
+                return await q.answer("Claude masih bekerja. /stop untuk membatalkan.", show_alert=True)
+            await q.answer()
+            ctx.chat_data.pop("pending_options", None)
+            await q.edit_message_reply_markup(reply_markup=None)
+            await ctx.bot.send_message(chat_id, f"➡️ {choice}")
+            await self.run_prompt(ctx, chat_id, choice)
+
+        elif kind == "grant":
+            pending: list[str] = ctx.chat_data.get("pending_grants", [])
+            tools = pending if value == "all" else [t for t in pending if t == value]
+            if not tools:
+                return await q.answer("Permintaan kedaluwarsa.", show_alert=True)
+            if chat_id in self.runs:
+                return await q.answer("Claude masih bekerja.", show_alert=True)
+            state.granted_tools = list(dict.fromkeys([*state.granted_tools, *tools]))
+            self.store.save()
+            ctx.chat_data.pop("pending_grants", None)
+            await q.answer("Diizinkan")
+            await q.edit_message_reply_markup(reply_markup=None)
+            await ctx.bot.send_message(chat_id, f"✅ Diizinkan: {', '.join(tools)}")
+            await self.run_prompt(
+                ctx,
+                chat_id,
+                f"Izin untuk tool {', '.join(tools)} sudah diberikan. Silakan lanjutkan tugas tadi.",
+            )
+
+        elif kind == "dismiss":
+            await q.answer()
+            await q.edit_message_reply_markup(reply_markup=None)
+
+    # ---------- inti: menjalankan Claude ----------
+
+    async def run_prompt(self, ctx: ContextTypes.DEFAULT_TYPE, chat_id: int, prompt: str) -> None:
+        if chat_id in self.runs:
+            await ctx.bot.send_message(
+                chat_id, "⏳ Claude masih bekerja. Tunggu selesai atau kirim /stop."
+            )
+            return
+        state = self.store.get(chat_id)
+        state.last_prompt = prompt
+        progress = _Progress(ctx.bot, chat_id, enabled=self.cfg.stream_progress)
+        await progress.start()
+        typing = asyncio.create_task(_typing_loop(ctx.bot, chat_id))
+        started = time.monotonic()
+        result = RunResult()
+        try:
+            result = await self._execute(chat_id, prompt, progress, allow_retry=True)
+        except FileNotFoundError:
+            result.text = (
+                f"Perintah '{self.cfg.claude_bin}' tidak ditemukan. "
+                "Pasang Claude Code atau atur CLAUDE_BIN."
+            )
+            result.is_error = True
+        except Exception as exc:  # noqa: BLE001 - lapor ke user, jangan matikan bot
+            log.exception("Gagal menjalankan Claude")
+            result.text = f"Gagal menjalankan Claude: {exc}"
+            result.is_error = True
+        finally:
+            typing.cancel()
+            self.runs.pop(chat_id, None)
+
+        elapsed = time.monotonic() - started
+        if result.session_id:
+            state.session_id = result.session_id
+        if result.saw_result:
+            state.turns += 1
+            state.total_cost_usd += result.cost_usd
+        self.store.save()
+
+        if result.cancelled:
+            await progress.finish("⏹ Dibatalkan.")
+            return
+        if result.timed_out:
+            await progress.finish(f"⌛ Timeout setelah {self.cfg.timeout_seconds}s.")
+            return
+
+        footer = f"{'⚠️' if result.is_error else '✅'} {elapsed:.0f}s"
+        if result.saw_result:
+            footer += f" · {result.num_turns} langkah · ${result.cost_usd:.4f}"
+        await progress.finish(footer)
+        await self._deliver(ctx, chat_id, result)
+
+    async def _execute(
+        self, chat_id: int, prompt: str, progress: "_Progress", *, allow_retry: bool
+    ) -> RunResult:
+        state = self.store.get(chat_id)
+        full_cfg_prompt = SYSTEM_PROMPT
+        cfg = self.cfg
+        if cfg.append_system_prompt:
+            full_cfg_prompt = f"{cfg.append_system_prompt}\n\n{SYSTEM_PROMPT}"
+        cfg = replace(cfg, append_system_prompt=full_cfg_prompt)
+        args = build_args(
+            cfg,
+            session_id=state.session_id,
+            permission_mode=state.permission_mode,
+            model=state.model,
+            extra_allowed_tools=state.granted_tools,
+        )
+        run = ClaudeRun(cfg, args)
+        self.runs[chat_id] = run
+
+        async def on_event(event: dict[str, Any]) -> None:
+            await self._on_event(event, progress)
+
+        result = await run.run(prompt, on_event)
+        resume_broken = (
+            state.session_id
+            and not result.saw_result
+            and not result.cancelled
+            and not result.timed_out
+            and "conversation" in result.stderr_tail.lower()
+        )
+        if resume_broken and allow_retry:
+            log.warning("Session %s tidak bisa dilanjutkan, mulai baru", state.session_id)
+            state.session_id = None
+            await progress.add("ℹ️ Sesi lama tidak ditemukan, memulai yang baru.")
+            self.runs.pop(chat_id, None)
+            return await self._execute(chat_id, prompt, progress, allow_retry=False)
+        return result
+
+    async def _on_event(self, event: dict[str, Any], progress: "_Progress") -> None:
+        for block in assistant_blocks(event):
+            if block.get("type") == "tool_use":
+                await progress.add(describe_tool_use(block.get("name", "?"), block.get("input")))
+        if self.cfg.show_tool_output and event.get("type") == "user":
+            content = (event.get("message") or {}).get("content")
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        snippet = _tool_result_text(block.get("content"))
+                        if snippet:
+                            await progress.add("   ↳ " + snippet)
+
+    async def _deliver(self, ctx: ContextTypes.DEFAULT_TYPE, chat_id: int, result: RunResult) -> None:
+        text = result.text or ""
+        if result.is_error and not text:
+            text = "Claude gagal tanpa pesan."
+            if result.stderr_tail:
+                text += "\n\n" + result.stderr_tail[-1500:]
+        body, question = extract_question(text)
+        chunks = split_message(body) if body else []
+
+        denial_note = format_denials(result.permission_denials)
+        denied_tools = sorted(
+            {
+                str(d.get("tool_name"))
+                for d in result.permission_denials
+                if isinstance(d, dict) and d.get("tool_name")
+            }
+        )
+
+        for chunk in chunks:
+            await ctx.bot.send_message(chat_id, chunk)
+
+        if question:
+            ctx.chat_data.pop("pending_options", None)
+            await ctx.bot.send_message(
+                chat_id,
+                f"❓ {question.question}\n✍️ Pilih tombol atau ketik jawabanmu sendiri.",
+                reply_markup=self._ask_markup(ctx, question),
+            )
+
+        if denial_note:
+            ctx.chat_data["pending_grants"] = denied_tools
+            rows = [
+                [InlineKeyboardButton(f"✅ Izinkan {t}", callback_data=f"grant:{t}"[:64])]
+                for t in denied_tools[:4]
+            ]
+            if len(denied_tools) > 1:
+                rows.append([InlineKeyboardButton("✅ Izinkan semua", callback_data="grant:all")])
+            rows.append([InlineKeyboardButton("Abaikan", callback_data="dismiss:")])
+            await ctx.bot.send_message(
+                chat_id, denial_note, reply_markup=InlineKeyboardMarkup(rows) if denied_tools else None
+            )
+
+    def _ask_markup(self, ctx: ContextTypes.DEFAULT_TYPE, q: Question) -> InlineKeyboardMarkup | None:
+        if not q.options:
+            return None
+        ctx.chat_data["pending_options"] = list(q.options)
+        rows = [
+            [InlineKeyboardButton(button_label(opt), callback_data=f"ask:{i}")]
+            for i, opt in enumerate(q.options)
+        ]
+        return InlineKeyboardMarkup(rows)
+
+    # ---------- setup ----------
+
+    def register(self, app: Application) -> None:
+        app.add_handler(CommandHandler(["start", "help"], self.cmd_help))
+        app.add_handler(CommandHandler("id", self.cmd_id))
+        app.add_handler(CommandHandler("start_claude", self.cmd_start_claude))
+        app.add_handler(CommandHandler("end_claude", self.cmd_end_claude))
+        app.add_handler(CommandHandler("new", self.cmd_new))
+        app.add_handler(CommandHandler("stop", self.cmd_stop))
+        app.add_handler(CommandHandler("status", self.cmd_status))
+        app.add_handler(CommandHandler("mode", self.cmd_mode))
+        app.add_handler(CommandHandler("model", self.cmd_model))
+        app.add_handler(CallbackQueryHandler(self.on_callback))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.on_text))
+
+    @staticmethod
+    async def post_init(app: Application) -> None:
+        await app.bot.set_my_commands(
+            [
+                BotCommand("start_claude", "Mulai sesi Claude"),
+                BotCommand("end_claude", "Akhiri sesi Claude"),
+                BotCommand("new", "Percakapan baru"),
+                BotCommand("stop", "Batalkan proses berjalan"),
+                BotCommand("status", "Info sesi"),
+                BotCommand("mode", "Ganti permission mode"),
+                BotCommand("model", "Ganti model"),
+                BotCommand("help", "Bantuan"),
+            ]
+        )
+
+
+def _tool_result_text(content: Any, limit: int = 200) -> str:
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        text = " ".join(
+            str(b.get("text", "")) for b in content if isinstance(b, dict) and b.get("type") == "text"
+        )
+    else:
+        return ""
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+async def _typing_loop(bot: Any, chat_id: int) -> None:
+    try:
+        while True:
+            try:
+                await bot.send_chat_action(chat_id, ChatAction.TYPING)
+            except TelegramError:
+                pass
+            await asyncio.sleep(4)
+    except asyncio.CancelledError:
+        pass
+
+
+class _Progress:
+    """Satu pesan 'sedang bekerja' yang diedit seiring tool dipakai."""
+
+    def __init__(self, bot: Any, chat_id: int, enabled: bool):
+        self._bot = bot
+        self._chat_id = chat_id
+        self._enabled = enabled
+        self._msg = None
+        self._lines: list[str] = []
+        self._last_edit = 0.0
+        self._last_text = ""
+
+    async def start(self) -> None:
+        if self._enabled:
+            self._msg = await self._bot.send_message(self._chat_id, "⏳ Claude bekerja…")
+
+    def _render(self, header: str) -> str:
+        body = "\n".join(self._lines[-PROGRESS_LINES:])
+        return f"{header}\n{body}".strip()[:4000]
+
+    async def _edit(self, text: str) -> None:
+        if self._msg is None or text == self._last_text:
+            return
+        try:
+            await self._msg.edit_text(text)
+            self._last_text = text
+        except BadRequest as exc:
+            if "not modified" not in str(exc).lower():
+                log.debug("edit progress gagal: %s", exc)
+        except TelegramError as exc:
+            log.debug("edit progress gagal: %s", exc)
+
+    async def add(self, line: str) -> None:
+        self._lines.append(line)
+        now = time.monotonic()
+        if now - self._last_edit >= EDIT_INTERVAL:
+            self._last_edit = now
+            await self._edit(self._render("⏳ Claude bekerja…"))
+
+    async def finish(self, footer: str) -> None:
+        if self._msg is None:
+            return
+        self._last_text = ""
+        await self._edit(self._render(footer))
