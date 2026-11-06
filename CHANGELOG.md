@@ -12,6 +12,18 @@ bisa terjadi di versi minor dan akan ditandai **BREAKING**.
   dimulai saat Claude **belum login** (dicek lewat `claude auth status`), hanya untuk user di allowlist yang sudah
   membuka 2FA, kedaluwarsa otomatis 10 menit, dan bisa dibatalkan dengan `/claude_login batal`. Bila prompt gagal karena
   autentikasi, bot kini menyarankan `/claude_login` dan mencatatnya di log.
+- **Ilustrasi animasi di `clautele-video`** (`"draw"` per scene), menjawab keluhan "animasinya datar, tulisan doang":
+  ikon neon (21 jenis: database, server, cloud, app, person, gear, heart, ...), kotak/lingkaran/garis/panah/poligon,
+  denah rumah yang tergambar pelan, grafik batang yang tumbuh, kotak berantakan yang menata diri, titik cahaya yang
+  mengalir di garis, serta animasi masuk (draw, pop, fade, rise, slide, type) dan loop (pulse, float, spin, blink,
+  rise) yang dijadwalkan lewat `at`. Frame digambar Pillow lalu dialirkan ke ffmpeg dan ikut berpendar seperti teks.
+  Semuanya lewat satu perintah `clautele-video`, jadi tidak butuh izin `python3`/`ffmpeg` langsung.
+- Panduan sistem untuk Claude: video penjelasan wajib memakai ilustrasi sesuai konteks, bukan hanya teks.
+- Dependensi baru: **Pillow** (hanya dipakai scene dengan `draw`; pesan jelas bila belum terpasang). Mode host:
+  jalankan ulang `deploy/install-host.sh`.
+
+### Catatan
+- Scene bergambar dirender sekitar 5x durasi video (1080x1920).
 
 ## [0.6.0] - 2026-11-06
 

@@ -1,3 +1,5 @@
+import dataclasses
+import importlib.util
 import json
 import shutil
 import subprocess
@@ -293,3 +295,137 @@ def test_unknown_voice_aborts_before_any_synthesis(tmp_path, monkeypatch, tts_sr
     assert "DIAM-DIAM" in capsys.readouterr().err
     assert not [r for r in tts_srv.requests if r["path"] == "/v1/audio/speech"]  # tak ada sintesis dengan suara bawaan
     assert not (tmp_path / "o.mp4").exists()
+
+
+# ---------- ilustrasi (draw) ----------
+
+from clautele import illustrate as il  # noqa: E402
+
+HAS_PIL = importlib.util.find_spec("PIL") is not None
+needs_pil = pytest.mark.skipif(not (HAS_FFMPEG and HAS_PIL), reason="ffmpeg/font/Pillow tidak ada")
+SAMPLE_DRAW = [
+    {"t": "floorplan", "x": 50, "y": 45, "size": 80, "labels": ["Tamu", "Dapur"]},
+    {"t": "icon", "name": "database", "x": 20, "y": 80, "size": 18, "label": "Data", "at": 0.5, "anim": "pop", "loop": "pulse"},
+    {"t": "arrow", "x1": 30, "y1": 80, "x2": 70, "y2": 80, "dots": True, "at": 1},
+    {"t": "box", "x": 80, "y": 80, "w": 30, "h": 12, "text": "APP"},
+    {"t": "bars", "x": 50, "y": 60, "w": 40, "h": 20, "values": [1, 3, 2]},
+    {"t": "chaos", "x": 50, "y": 30, "count": 8, "color2": "green"},
+    {"t": "text", "x": 50, "y": 95, "text": "halo", "anim": "type"},
+    {"t": "poly", "points": [[10, 10], [50, 30], [90, 10]], "dots": True},
+]
+
+
+def test_draw_parsed_and_scene_may_have_only_drawing(tmp_path):
+    sp = spec_of(tmp_path, scenes=[{"draw": SAMPLE_DRAW}])
+    assert len(sp.scenes[0].draw) == len(SAMPLE_DRAW)
+    assert sp.scenes[0].draw[1].p["anim"] == "pop" and sp.scenes[0].draw[3].p["fill"] is True  # box: isi default
+
+
+@pytest.mark.parametrize(
+    "draw, msg",
+    [
+        ("x", "daftar"),
+        ([1], "objek"),
+        ([{"t": "naga"}], "tidak dikenal"),
+        ([{"t": "icon", "name": "unicorn"}], "name"),
+        ([{"t": "icon", "name": "gear", "size": 999}], "size"),
+        ([{"t": "icon", "name": "gear", "x": "tengah"}], "angka"),
+        ([{"t": "icon", "name": "gear", "anim": "meledak"}], "anim"),
+        ([{"t": "icon", "name": "gear", "loop": "gila"}], "loop"),
+        ([{"t": "icon", "name": "gear", "color": "ungu muda"}], "color"),
+        ([{"t": "text"}], "text wajib"),
+        ([{"t": "text", "text": "x" * 100}], "terlalu panjang"),
+        ([{"t": "poly", "points": [[1, 2]]}], "points"),
+        ([{"t": "poly", "points": [[1, "a"], [2, 3]]}], "x,y"),
+        ([{"t": "bars", "values": []}], "values"),
+        ([{"t": "bars", "values": [-1]}], "values"),
+        ([{"t": "floorplan", "labels": list("abcde")}], "maks 4"),
+        ([{"t": "rect", "fill": "ya"}], "fill"),
+        ([{"t": "rect"}] * 61, "maksimal"),
+    ],
+)
+def test_invalid_draw_rejected(tmp_path, draw, msg):
+    with pytest.raises(SpecError, match=msg):
+        spec_of(tmp_path, scenes=[{"title": "a", "draw": draw}])
+
+
+def test_every_icon_builds_and_stays_near_unit_box():
+    for name in il.ICON_NAMES:
+        shapes = il._icon_shapes(name)
+        assert shapes, name
+        for s in shapes:
+            assert all(abs(x) <= 1.3 and abs(y) <= 1.3 for x, y in s.pts), name
+
+
+def test_layout_with_drawing_keeps_text_in_top_strip(tmp_path):
+    for size in ("story", "portrait", "square", "landscape"):
+        sp = spec_of(tmp_path, size=size, footer="@a", scenes=[{"label": "01", "title": "Architecture Vision untuk semua", "body": "isi " * 40, "draw": SAMPLE_DRAW}])
+        top = [ln for ln in layout(sp, sp.scenes[0]) if ln.text != "@a"]
+        _, sy, _, _ = il.stage_rect(sp.width, sp.height)
+        assert all(ln.y >= 0 for ln in top), size
+        assert max(ln.y for ln in top) < sy, size  # baris teks mulai di atas panggung gambar
+
+
+@needs_pil
+def test_stage_frames_animate_and_have_right_size():
+    els = il.parse_elements(SAMPLE_DRAW, 1, lambda v: vm.PALETTE.get(v, v))
+    st = il.Stage(540, 960, vm.PALETTE["cyan"], els, vm.FONT)
+    f0, f1, f2 = st.frame(0.2), st.frame(1.5), st.frame(5.0)
+    assert len(f0) == st.sw * st.sh * 3
+    assert f0 != f1 != f2  # ada gerak: gambar bertambah seiring waktu
+    assert sum(f2) > sum(f0)
+
+
+def test_scene_command_pipes_illustration_and_shifts_audio_index(tmp_path):
+    sp = spec_of(tmp_path, scenes=[{"title": "a", "draw": [{"t": "icon", "name": "star"}]}])
+    sc = sp.scenes[0]
+    cmd = vm.scene_command(sp, sc, layout(sp, sc), [], tmp_path / "o.mp4", with_audio=True)
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "rawvideo" in cmd and "[3:v]" in graph and "[4:a]" in graph and "[illus]" in graph
+    plain = vm.scene_command(sp, dataclasses.replace(sc, draw=()), layout(sp, sc), [], tmp_path / "o.mp4", with_audio=True)
+    assert "rawvideo" not in plain and "[3:a]" in plain[plain.index("-filter_complex") + 1]  # tanpa draw: perilaku lama
+
+
+@needs_pil
+def test_render_drawn_scene_with_narration(tmp_path, monkeypatch, tts_srv):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("clautele.videomaker.audio_duration", lambda p: 1.0)
+    sp = vm.parse_spec(
+        {
+            "size": "320x568", "fps": 15,
+            "scenes": [
+                {"title": "Peta", "narration": "Halo", "duration": 1, "draw": SAMPLE_DRAW},
+                {"title": "Teks saja", "duration": 1},
+            ],
+        },
+        base_dir=tmp_path,
+    )
+    vm.render(sp, tmp_path / "o.mp4", tts_cfg=tts_cfg(tts_srv), log=lambda m: None)
+    st, dur = streams(tmp_path / "o.mp4")
+    assert st["video"]["codec_name"] == "h264" and "audio" in st
+    assert abs(dur - (0.4 + 1.0 + 0.6 + 1)) < 0.4
+
+
+@needs_pil
+def test_render_drawn_video_without_audio(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "s.json").write_text(json.dumps({"size": "320x568", "fps": 15, "scenes": [{"title": "Denah", "duration": 2, "draw": SAMPLE_DRAW}]}))
+    assert vm.main(["s.json", "o.mp4"]) == 0
+    st, dur = streams(tmp_path / "o.mp4")
+    assert "audio" not in st and abs(dur - 2.0) < 0.3
+
+
+def test_draw_without_pillow_gives_clear_error(tmp_path, monkeypatch):
+    import builtins
+
+    real = builtins.__import__
+
+    def fake(name, *a, **k):
+        if name == "PIL" or name.startswith("PIL."):
+            raise ImportError("no PIL")
+        return real(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake)
+    sp = spec_of(tmp_path, scenes=[{"title": "a", "draw": [{"t": "icon", "name": "star"}]}])
+    with pytest.raises(SpecError, match="Pillow"):
+        vm._run_scene(["true"], sp, sp.scenes[0], tmp_path)

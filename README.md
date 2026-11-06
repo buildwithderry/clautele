@@ -71,6 +71,10 @@ atau kirim video dengan keterangan *"potong menit 0:10–0:25 lalu kecilkan jadi
   Instagram gaya neon tentang apa itu EA, lalu ajak komen MAU"*. Claude menulis spec JSON dan memakai perintah
   `clautele-video` (renderer bawaan, diizinkan otomatis, tanpa tombol izin). Format 9:16 untuk Reels/Story, atau
   square/portrait/landscape. Cek sendiri: `docker compose exec clautele clautele-video --example`.
+  Scene boleh berisi **ilustrasi animasi** (`draw`): denah yang tergambar pelan, ikon (database, server, awan,
+  aplikasi, orang, gear, hati, ...), kotak, panah dengan titik cahaya mengalir, grafik batang yang tumbuh, dan kotak
+  berantakan yang menjadi rapi. Butuh Pillow (`pip install -r requirements.txt`; di mode host jalankan ulang
+  `deploy/install-host.sh`).
 - Waktu render sekitar 3-4x durasi video di server 2 CPU (video 1 menit ≈ 3-4 menit).
 - Hasil dikirim sebagai MP4 yang bisa diputar langsung (maks 50 MB; Claude diminta menjaga di bawah ±45 MB).
 - Video dari Anda maksimal 20 MB (batas Bot API Telegram). Claude **tidak bisa menonton atau mendengar** video: ia

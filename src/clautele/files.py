@@ -146,6 +146,15 @@ def video_system_prompt(outbox: Path, inbox: Path, max_mb: int, has_maker: bool 
         'Spec: {"size":"story|square|portrait|landscape|WxH","fps":30,"footer":"@akun","audio":"musik.mp3 (opsional)",'
         '"scenes":[{"label":"01","title":"JUDUL","body":"isi singkat","color":"cyan|magenta|green|yellow|orange|red|blue|purple|white|#RRGGBB","duration":4}]}. '
         "Maks 40 scene dan 180 detik. Pecah materi jadi scene pendek: judul <= 6 kata, isi <= 2 kalimat, 3-5 detik. "
+        "ILUSTRASI (wajib untuk video penjelasan, jangan hanya teks): beri tiap scene yang membahas sesuatu yang bisa "
+        'digambar field "draw" berisi 3-8 elemen animasi yang menggambarkan KONTEKSNYA, mis. membahas denah/blueprint -> '
+        '{"t":"floorplan"}; data -> icon database; server/cloud/aplikasi/orang -> icon server|cloud|app|person; alur -> '
+        'arrow dengan "dots":true; lapisan/domain -> box bersusun + arrow; perbandingan sebelum/sesudah -> {"t":"chaos"}; '
+        'angka/tren -> bars; ajakan follow/like -> box + icon heart "loop":"rise". Jadwalkan kemunculan lewat "at" (detik) '
+        'agar gambar tumbuh bertahap, dan beri "loop":"pulse|float|spin" pada elemen kunci. Elemen: icon, box, rect, circle, '
+        "line, arrow, poly, text, bars, floorplan, chaos; koordinat x,y 0-100 (pusat elemen) di panggung di bawah judul. "
+        "Skema lengkap + daftar ikon: `clautele-video --help`. Pada scene bergambar isi (body) cukup satu kalimat pendek. "
+        "Render scene bergambar sekitar 5x durasi video, jadi jaga total video <= 90 detik. "
         "Gunakan story (9:16) untuk Instagram Reels/Story, portrait untuk feed. Jalankan `clautele-video --help` bila ragu. "
         "Isi footer HANYA dengan akun/teks yang disebut user; jangan mengarang nama akun (bisa milik orang lain). "
         "Perintah ini mengizinkan dirinya sendiri; rendernya memakan waktu sekitar 3-4x durasi video, jadi jangan membuat video lebih panjang dari yang diminta. "

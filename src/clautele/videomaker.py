@@ -6,7 +6,7 @@
 
 Dibuat agar Claude tidak perlu merangkai filter ffmpeg yang rumit: cukup menulis JSON, lalu satu perintah.
 Setiap scene dirender dengan satu panggilan ffmpeg (latar gelap + grid + teks neon berpendar + bingkai),
-lalu semua scene digabung. Tidak ada dependensi selain ffmpeg dan stdlib.
+lalu semua scene digabung. Scene dengan "draw" (ilustrasi) menggambar frame dengan Pillow dan mengalirkannya ke ffmpeg.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from . import illustrate
 from .tts import TtsConfig, TtsError, audio_duration, resolve_voice, synthesize
 
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -68,13 +69,15 @@ Spec JSON:
       "body": "Penjelasan.",  // isi, opsional (diperkecil otomatis, dibungkus per baris)
       "narration": "Teks yang dibacakan.", // opsional; butuh TTS (TTS_BASE_URL). Durasi scene menyesuaikan panjang suara
       "color": "cyan",        // cyan|magenta|green|yellow|orange|red|blue|purple|white|#RRGGBB (default: bergilir)
-      "duration": 4           // detik, 1-30 (default 4)
+      "duration": 4,          // detik, 1-30 (default 4)
+      "draw": [ ... ]         // opsional: ilustrasi animasi sesuai konteks (lihat di bawah)
     }
   ]
 }
 Tips: judul <= 6 kata, isi <= 2 kalimat, 3-5 detik per scene. Hasil: MP4 H.264 siap diunggah ke Instagram/Telegram.
 Output harus berekstensi .mp4 dan berada di dalam folder kerja saat ini.
-"""
+
+""" + illustrate.SCHEMA_DRAW_HELP
 
 EXAMPLE = {
     "size": "story",
@@ -82,7 +85,23 @@ EXAMPLE = {
     "footer": "@akunkamu",
     "scenes": [
         {"title": "ENTERPRISE ARCHITECTURE", "body": "Peta besar bisnis dan teknologi", "color": "cyan", "duration": 4},
-        {"label": "01", "title": "APA ITU EA?", "body": "Disiplin yang menyelaraskan strategi bisnis dengan IT.", "color": "magenta"},
+        {
+            "label": "01", "title": "APA ITU EA?", "body": "Peta besar bisnis dan IT.", "color": "magenta", "duration": 6,
+            "draw": [
+                {"t": "floorplan", "x": 50, "y": 45, "size": 85, "labels": ["Bisnis", "Data", "Aplikasi", "IT"]},
+                {"t": "icon", "name": "bulb", "x": 88, "y": 8, "size": 14, "at": 3, "anim": "pop", "loop": "pulse", "color": "yellow"},
+            ],
+        },
+        {
+            "title": "DATA MENGALIR", "color": "green", "duration": 5,
+            "draw": [
+                {"t": "icon", "name": "person", "x": 15, "y": 40, "size": 20, "label": "User", "anim": "pop"},
+                {"t": "arrow", "x1": 27, "y1": 40, "x2": 43, "y2": 40, "at": 0.8, "dots": True},
+                {"t": "icon", "name": "app", "x": 55, "y": 40, "size": 20, "label": "Aplikasi", "at": 1.2, "anim": "pop"},
+                {"t": "arrow", "x1": 67, "y1": 40, "x2": 80, "y2": 40, "at": 2, "dots": True},
+                {"t": "icon", "name": "database", "x": 90, "y": 40, "size": 18, "label": "Data", "at": 2.4, "anim": "pop"},
+            ],
+        },
         {"title": "MAU TAHU CARA BUATNYA?", "body": "Tulis MAU di komentar!", "color": "green", "duration": 5},
     ],
 }
@@ -100,6 +119,7 @@ class Scene:
     color: str  # RRGGBB
     duration: float
     narration: str = ""
+    draw: tuple[illustrate.Element, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -182,9 +202,13 @@ def parse_spec(data: Any, *, base_dir: Path) -> Spec:
         body = _text(sc, "body", 400, i)
         label = _text(sc, "label", 40, i)
         narration = _text(sc, "narration", MAX_NARRATION_CHARS, i)
-        if not (title or body or label):
-            raise SpecError(f"scene {i + 1}: isi title, body, atau label")
-        scenes.append(Scene(label, title, body, _color(sc.get("color"), i), duration, narration))
+        try:
+            draw = illustrate.parse_elements(sc.get("draw"), i + 1, lambda v, i=i: _color(v, i))
+        except illustrate.DrawError as exc:
+            raise SpecError(str(exc)) from None
+        if not (title or body or label or draw):
+            raise SpecError(f"scene {i + 1}: isi title, body, label, atau draw")
+        scenes.append(Scene(label, title, body, _color(sc.get("color"), i), duration, narration, draw))
 
     if sum(len(s.narration) for s in scenes) > MAX_NARRATION_TOTAL:
         raise SpecError(f"total narasi melebihi {MAX_NARRATION_TOTAL} karakter")
@@ -281,8 +305,9 @@ class TextLine:
 
 def _blocks(spec: Spec, scene: Scene, t_start: int, b_start: int, base: int) -> tuple[int, list[str], int, list[str]]:
     max_w = int(spec.width * 0.84)
-    t_size, t_lines = fit(scene.title, t_start, int(base * 0.050), max_w, 5) if scene.title else (0, [])
-    b_size, b_lines = fit(scene.body, b_start, int(base * 0.034), max_w, 9) if scene.body else (0, [])
+    drawing = bool(scene.draw)  # dengan gambar, teks hanya di strip atas: lebih sedikit baris
+    t_size, t_lines = fit(scene.title, t_start, int(base * (0.040 if drawing else 0.050)), max_w, 2 if drawing else 5) if scene.title else (0, [])
+    b_size, b_lines = fit(scene.body, b_start, int(base * 0.034), max_w, 3 if drawing else 9) if scene.body else (0, [])
     return t_size, t_lines, b_size, b_lines
 
 
@@ -290,9 +315,12 @@ def layout(spec: Spec, scene: Scene) -> list[TextLine]:
     w, h = spec.width, spec.height
     base = min(w, h)  # ukuran huruf mengikuti sisi terpendek: landscape tidak meluap ke bawah
     label_size = int(base * 0.045)
-    gap = int(base * 0.05)
+    gap = int(base * (0.02 if scene.draw else 0.05))
     avail = int(h * 0.78)  # sisakan ruang untuk bingkai dan footer
-    label_h = int(label_size * LINE_H) + int(base * 0.04) if scene.label else 0
+    top = int(h * 0.06)
+    if scene.draw:  # judul dipadatkan ke strip atas; sisanya untuk panggung gambar
+        avail = int(h * illustrate.title_reserve(w, h)) - top
+    label_h = int(label_size * LINE_H) + int(base * (0.015 if scene.draw else 0.04)) if scene.label else 0
 
     t_start, b_start = int(base * 0.088), int(base * 0.050)
     while True:
@@ -300,15 +328,23 @@ def layout(spec: Spec, scene: Scene) -> list[TextLine]:
         title_h = int(len(t_lines) * t_size * LINE_H) + (gap if scene.body and scene.title else 0)
         body_h = int(len(b_lines) * b_size * LINE_H)
         total = label_h + title_h + body_h
-        if total <= avail or (b_start <= int(base * 0.034) and t_start <= int(base * 0.050)):
+        if total <= avail or (b_start <= int(base * 0.034) and t_start <= int(base * (0.040 if scene.draw else 0.050))):
             break
         if b_start > int(base * 0.034):
             b_start -= 4
         else:
             t_start -= 4
+    if scene.draw and total > avail and b_lines:  # strip judul terlalu sempit: potong isi, jangan tabrak gambar
+        room = avail - label_h - title_h
+        keep = max(1, room // max(1, int(b_size * LINE_H)))
+        if keep < len(b_lines):
+            b_lines = b_lines[:keep]
+            b_lines[-1] = b_lines[-1].rstrip(" .,;:") + "…"
 
     out: list[TextLine] = []
     y = max(int(h * 0.1), (h - total) // 2 - (int(h * 0.02) if h >= w else 0))
+    if scene.draw:
+        y = top + int(base * 0.03)
     if scene.label:
         out.append(TextLine(scene.label, label_size, y, 0.0))
         y += label_h
@@ -375,14 +411,28 @@ def scene_command(
     core_src = _text_chain(spec, scene, lines, core, files, border=True)
     # Blend "screen" hanya benar di ruang RGB; di YUV hitam (chroma 128) tergeser jadi warna. Karena itu gbrp.
     audio_graph: list[str] = []
+    a_in = 4 if scene.draw else 3  # input video ilustrasi (pipa) menempati indeks 3
     if with_audio:
         if voice is not None:  # suara ditunda sedikit, lalu diisi hening sampai scene berakhir
             audio_graph = [
-                "[3:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                f"[{a_in}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,"
                 f"adelay={int(VOICE_LEAD * 1000)}|{int(VOICE_LEAD * 1000)},apad[a]"
             ]
         else:  # scene tanpa narasi tetap perlu trek audio agar semua segmen seragam saat digabung
-            audio_graph = ["[3:a]aformat=sample_fmts=fltp:channel_layouts=stereo[a]"]
+            audio_graph = [f"[{a_in}:a]aformat=sample_fmts=fltp:channel_layouts=stereo[a]"]
+    illus_graph: list[str] = []
+    final = "[bg][neon]blend=all_mode=screen,format=yuv420p[v]"
+    if scene.draw:  # ilustrasi: frame dari pipa (RGB hitam + garis neon), diberi fade, diletakkan di panggung, lalu berpendar
+        sx, sy, _, _ = illustrate.stage_rect(w, h)
+        out_at = max(0.0, d - 0.4)
+        illus_graph = [
+            f"[3:v]fade=t=in:st=0:d=0.25,fade=t=out:st={out_at:.3f}:d=0.4,pad={w}:{h}:{sx}:{sy}:black,format=gbrp,split=3[i1][i2][i3]",
+            f"[i1]scale={half_w}:{half_h},gblur=sigma={sig_big},scale={w}:{h}[ib]",
+            f"[i2]scale={half_w}:{half_h},gblur=sigma={sig_small},scale={w}:{h}[is]",
+            "[ib][is]blend=all_mode=screen[ig]",
+            "[ig][i3]blend=all_mode=screen[illus]",
+        ]
+        final = "[bg][neon]blend=all_mode=screen[b1];[b1][illus]blend=all_mode=screen,format=yuv420p[v]"
     graph = ";".join(
         [
             *audio_graph,
@@ -393,7 +443,8 @@ def scene_command(
             f"[2:v]{core_src},format=gbrp[core]",
             "[gb][gs]blend=all_mode=screen[g]",
             "[g][core]blend=all_mode=screen[neon]",
-            "[bg][neon]blend=all_mode=screen,format=yuv420p[v]",
+            *illus_graph,
+            final,
         ]
     )
     src = lambda color: f"color=c=0x{color}:s={w}x{h}:r={fps}:d={d:.3f}"
@@ -402,6 +453,9 @@ def scene_command(
         "-f", "lavfi", "-i", src("000000"),
         "-f", "lavfi", "-i", src("000000"),
     ]  # fmt: skip
+    if scene.draw:
+        _, _, sw, sh = illustrate.stage_rect(w, h)
+        inputs += ["-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{sw}x{sh}", "-framerate", str(fps), "-i", "-"]
     if with_audio:
         inputs += ["-i", str(voice)] if voice is not None else ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
     audio_out = (
@@ -464,6 +518,34 @@ def _narrate(spec: Spec, tts_cfg: TtsConfig | None, tts_error: str, tmp: Path, l
     return dataclasses.replace(spec, scenes=tuple(scenes)), voices
 
 
+def _run_scene(cmd: list[str], spec: Spec, scene: Scene, tmp: Path) -> tuple[int, str]:
+    """Jalankan ffmpeg satu scene. Scene bergambar: frame digambar Pillow dan dialirkan lewat stdin."""
+    if not scene.draw:
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        return r.returncode, r.stderr
+    try:
+        stage = illustrate.Stage(spec.width, spec.height, scene.color, scene.draw, FONT)
+    except illustrate.DrawError as exc:
+        raise SpecError(str(exc)) from None
+    err_path = tmp / "ffmpeg.err"
+    frames = max(1, round(scene.duration * spec.fps))
+    with err_path.open("wb") as err:
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err)
+        try:
+            assert proc.stdin is not None
+            for n in range(frames):
+                proc.stdin.write(stage.frame(n / spec.fps))
+            proc.stdin.close()
+        except BrokenPipeError:
+            pass  # ffmpeg berhenti lebih awal; pesan kesalahannya ada di stderr
+        except Exception:
+            proc.kill()
+            raise
+        finally:
+            proc.wait()
+    return proc.returncode, err_path.read_text(errors="replace")
+
+
 def render(spec: Spec, out: Path, *, tts_cfg: TtsConfig | None = None, tts_error: str = "", log=lambda m: print(m, file=sys.stderr, flush=True)) -> None:
     if shutil.which("ffmpeg") is None:
         raise SpecError("ffmpeg tidak terpasang")
@@ -485,9 +567,9 @@ def render(spec: Spec, out: Path, *, tts_cfg: TtsConfig | None = None, tts_error
                 files.append(f)
             seg = tmp / f"seg{i:03d}.mp4"
             cmd = scene_command(spec, scene, lines, files, seg, with_audio=with_audio, voice=voices.get(i - 1))
-            r = subprocess.run(cmd, capture_output=True, text=True)
-            if r.returncode != 0 or not seg.exists():
-                raise SpecError(f"ffmpeg gagal pada scene {i}: {r.stderr.strip()[-600:]}")
+            code, stderr = _run_scene(cmd, spec, scene, tmp)
+            if code != 0 or not seg.exists():
+                raise SpecError(f"ffmpeg gagal pada scene {i}: {stderr.strip()[-600:]}")
             segments.append(seg)
         listing = tmp / "list.txt"
         listing.write_text("".join(f"file '{s}'\n" for s in segments), encoding="utf-8")
