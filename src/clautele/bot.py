@@ -29,6 +29,7 @@ from telegram.ext import (
 )
 
 from . import __version__
+from .auth import AuthError, LoginFlow, looks_like_auth_error, status as auth_status
 from .asks import SYSTEM_PROMPT, Question, button_label, extract_question
 from .config import VALID_MODES, Config
 from .grants import options_for
@@ -66,7 +67,8 @@ HELP = (
     "/model `<nama>`: ganti model (kosong = default)\n"
     "/id: tampilkan Telegram user ID Anda\n"
     "/login `<kode>`: buka kunci dengan kode 2FA (jika 2FA aktif)\n"
-    "/logout: kunci kembali\n\n"
+    "/logout: kunci kembali\n"
+    "/claude\\_login: login ulang Claude (hanya saat login kedaluwarsa)\n\n"
     "Anda juga bisa mengirim *foto atau dokumen* (dengan keterangan sebagai instruksi), dan Claude "
     "bisa mengirim file hasil kerjanya ke chat ini.\n\n"
     "Setelah /start\\_claude, kirim pesan biasa sebagai prompt. Kalau Claude bertanya, "
@@ -79,6 +81,7 @@ class ClauteleBot:
         self.cfg = cfg
         self.store = store
         self.runs: dict[int, ClaudeRun] = {}
+        self.logins: dict[int, LoginFlow] = {}  # login ulang Claude yang menunggu kode, per chat
         self.gate = TotpGate(cfg.totp_secret, session_seconds=cfg.totp_session_minutes * 60)
 
     # ---------- util ----------
@@ -127,6 +130,73 @@ class ClauteleBot:
             return await self._deny(update)
         self.gate.lock(update.effective_user.id)
         await update.effective_message.reply_text("🔒 Terkunci. /login <kode> untuk membuka lagi.")
+
+    async def cmd_claude_login(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Login ulang akun Claude di server. Hanya bila Claude belum login / sesinya kedaluwarsa."""
+        if not self._allowed(update):
+            return await self._deny(update)
+        msg = update.effective_message
+        chat_id = update.effective_chat.id
+        if ctx.args and ctx.args[0].lower() in {"batal", "cancel"}:
+            flow = self.logins.pop(chat_id, None)
+            if flow is None:
+                return await msg.reply_text("Tidak ada proses login yang sedang menunggu.")
+            flow.cancel()
+            return await msg.reply_text("❎ Login dibatalkan.")
+        if chat_id in self.runs:
+            return await msg.reply_text("⏳ Claude sedang bekerja. Tunggu selesai atau kirim /stop dulu.")
+        try:
+            st = await auth_status(self.cfg)
+        except AuthError as exc:
+            return await msg.reply_text(f"⚠️ Tidak bisa memeriksa status login: {exc}")
+        if st.logged_in:
+            until = f" (berlaku sampai {st.expires_at})" if st.expires_at else ""
+            return await msg.reply_text(
+                f"✅ Claude masih login{until}. Login ulang hanya bisa dilakukan saat belum login atau sudah kedaluwarsa."
+            )
+        if old := self.logins.pop(chat_id, None):
+            old.cancel()
+        flow = LoginFlow(self.cfg)
+        try:
+            url = await flow.start()
+        except AuthError as exc:
+            log.warning("Login Claude gagal dimulai: %s", exc)
+            return await msg.reply_text(f"❌ Gagal memulai login: {exc}")
+        self.logins[chat_id] = flow
+        log.info("Login ulang Claude dimulai oleh user id %s", update.effective_user.id)
+        await msg.reply_text(
+            "🔑 Login Claude\n"
+            "1. Buka tautan ini di browser dan masuk dengan akun Claude:\n"
+            f"{url}\n"
+            "2. Klik Authorize, salin kode yang tampil di halaman.\n"
+            "3. Kirim kode itu ke chat ini sebagai pesan biasa (pesannya akan saya hapus).\n\n"
+            "Batal: /claude_login batal. Kedaluwarsa otomatis dalam 10 menit."
+        )
+
+    async def _finish_login(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE, flow: LoginFlow) -> None:
+        msg = update.effective_message
+        chat_id = update.effective_chat.id
+        code = (msg.text or "").strip()
+        try:
+            await msg.delete()  # kode tidak perlu tersisa di riwayat chat
+        except TelegramError:
+            pass
+        self.logins.pop(chat_id, None)
+        ok, info = await flow.submit(code)
+        if ok:
+            try:
+                st = await auth_status(self.cfg)
+            except AuthError:
+                st = None
+            ok = bool(st and st.logged_in)
+            if ok:
+                info = "Login berhasil" + (f", berlaku sampai {st.expires_at}." if st.expires_at else ".")
+            else:
+                info = "Kode diterima tetapi status login masih belum aktif."
+        log.info("Login ulang Claude %s (user id %s)", "berhasil" if ok else f"gagal: {info}", update.effective_user.id)
+        await ctx.bot.send_message(
+            chat_id, ("✅ " if ok else "❌ ") + info + ("" if ok else "\nCoba lagi dengan /claude_login.")
+        )
 
     # ---------- perintah ----------
 
@@ -259,6 +329,8 @@ class ClauteleBot:
         if not self._allowed(update):
             return await self._deny(update)
         chat_id = update.effective_chat.id
+        if flow := self.logins.get(chat_id):
+            return await self._finish_login(update, ctx, flow)
         if not self.store.get(chat_id).active:
             return await update.effective_message.reply_text(
                 "Sesi Claude belum aktif. Kirim /start_claude dulu."
@@ -383,6 +455,16 @@ class ClauteleBot:
             return
         if result.timed_out:
             await progress.finish(f"⌛ Timeout setelah {self.cfg.timeout_seconds}s.")
+            return
+
+        if result.is_error and looks_like_auth_error(result.text, result.stderr_tail):
+            log.warning("Claude gagal autentikasi: %s", (result.text or result.stderr_tail)[:300])
+            await progress.finish("🔑 Login Claude kedaluwarsa.")
+            await ctx.bot.send_message(
+                chat_id,
+                "🔑 Login Claude di server kedaluwarsa atau hilang, jadi prompt tidak bisa diproses. "
+                "Kirim /claude_login untuk login ulang.",
+            )
             return
 
         footer = f"{'⚠️' if result.is_error else '✅'} {elapsed:.0f}s"
@@ -637,6 +719,7 @@ class ClauteleBot:
         app.add_handler(CommandHandler("id", self.cmd_id))
         app.add_handler(CommandHandler("login", self.cmd_login))
         app.add_handler(CommandHandler("logout", self.cmd_logout))
+        app.add_handler(CommandHandler("claude_login", self.cmd_claude_login))
         app.add_handler(CommandHandler("start_claude", self.cmd_start_claude))
         app.add_handler(CommandHandler("end_claude", self.cmd_end_claude))
         app.add_handler(CommandHandler("new", self.cmd_new))
@@ -664,6 +747,7 @@ class ClauteleBot:
             [
                 BotCommand("login", "Buka kunci dengan kode 2FA"),
                 BotCommand("logout", "Kunci kembali"),
+                BotCommand("claude_login", "Login ulang Claude (saat kedaluwarsa)"),
                 BotCommand("start_claude", "Mulai sesi Claude"),
                 BotCommand("end_claude", "Akhiri sesi Claude"),
                 BotCommand("new", "Percakapan baru"),

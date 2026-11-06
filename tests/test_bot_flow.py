@@ -648,3 +648,103 @@ async def test_status_warns_when_voice_missing(tmp_path):
         assert "terhubung" in up.replies[0] and "⚠️" in up.replies[0] and "DIAM-DIAM" in up.replies[0]
     finally:
         srv.close()
+
+
+# ---------- login ulang Claude lewat Telegram ----------
+
+AUTH_CLAUDE = """
+import json, sys
+if sys.argv[1:3] == ["auth", "status"]:
+    import os
+    logged = os.path.exists(os.environ["FAKE_LOGIN_MARK"])
+    print(json.dumps({"loggedIn": logged, "authMethod": "claude.ai", "loginExpiresAt": "2026-12-04T00:00:00Z"}))
+elif sys.argv[1:3] == ["auth", "login"]:
+    import os
+    print("Opening browser to sign in…")
+    print("If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&state=abc")
+    sys.stdout.write("Paste code here if prompted > "); sys.stdout.flush()
+    code = sys.stdin.readline().strip()
+    if code == "KODE-BENAR#abc":
+        open(os.environ["FAKE_LOGIN_MARK"], "w").write("x")
+        print("Login successful.")
+    else:
+        print("Login failed: That code wasn't accepted.")
+        sys.exit(1)
+else:
+    sys.stdin.read()
+    print(json.dumps({"type": "result", "subtype": "success", "is_error": True, "session_id": "S1",
+        "result": "Failed to authenticate: OAuth session expired and could not be refreshed"}), flush=True)
+"""
+
+
+def auth_bot(tmp_path, monkeypatch, logged_in):
+    mark = tmp_path / "logged"
+    if logged_in:
+        mark.write_text("x")
+    monkeypatch.setenv("FAKE_LOGIN_MARK", str(mark))
+    return make(tmp_path, AUTH_CLAUDE)
+
+
+async def test_claude_login_refused_when_still_logged_in(tmp_path, monkeypatch):
+    bot, ctx, _ = auth_bot(tmp_path, monkeypatch, logged_in=True)
+    upd = FakeUpdate(5)
+    await bot.cmd_claude_login(upd, ctx)
+    assert "masih login" in upd.replies[0]
+    assert bot.logins == {}  # tidak ada proses login yang dimulai
+
+
+async def test_claude_login_blocked_for_stranger(tmp_path, monkeypatch):
+    bot, ctx, _ = auth_bot(tmp_path, monkeypatch, logged_in=False)
+    upd = FakeUpdate(999)
+    await bot.cmd_claude_login(upd, ctx)
+    assert "tidak diizinkan" in upd.replies[0]
+    assert bot.logins == {}
+
+
+async def test_claude_login_full_flow(tmp_path, monkeypatch):
+    bot, ctx, _ = auth_bot(tmp_path, monkeypatch, logged_in=False)
+    start = FakeUpdate(5)
+    await bot.cmd_claude_login(start, ctx)
+    assert "https://claude.com/cai/oauth/authorize" in start.replies[0]
+    assert 1 in bot.logins
+
+    code = FakeUpdate(5)
+    code.effective_message.text = "KODE-BENAR#abc"
+    await bot.on_text(code, ctx)
+    assert code.deleted  # pesan berisi kode dihapus
+    assert 1 not in bot.logins
+    assert any("Login berhasil" in m.text for m in ctx.bot.sent)
+
+
+async def test_claude_login_wrong_code_then_retry(tmp_path, monkeypatch):
+    bot, ctx, _ = auth_bot(tmp_path, monkeypatch, logged_in=False)
+    await bot.cmd_claude_login(FakeUpdate(5), ctx)
+    bad = FakeUpdate(5)
+    bad.effective_message.text = "salah"
+    await bot.on_text(bad, ctx)
+    assert bad.deleted and 1 not in bot.logins
+    assert any("Login failed" in m.text and "❌" in m.text for m in ctx.bot.sent)
+    # boleh coba lagi
+    again = FakeUpdate(5)
+    await bot.cmd_claude_login(again, ctx)
+    assert 1 in bot.logins
+    bot.logins.pop(1).cancel()
+
+
+async def test_claude_login_cancel(tmp_path, monkeypatch):
+    bot, ctx, _ = auth_bot(tmp_path, monkeypatch, logged_in=False)
+    await bot.cmd_claude_login(FakeUpdate(5), ctx)
+    flow = bot.logins[1]
+    ctx.args = ["batal"]
+    cancel = FakeUpdate(5)
+    await bot.cmd_claude_login(cancel, ctx)
+    assert "dibatalkan" in cancel.replies[0] and bot.logins == {}
+    await flow._proc.wait()
+    assert not flow.alive
+
+
+async def test_auth_error_in_prompt_points_to_claude_login(tmp_path, monkeypatch):
+    bot, ctx, _ = auth_bot(tmp_path, monkeypatch, logged_in=False)
+    await bot.run_prompt(ctx, 1, "halo")
+    texts = [m.text for m in ctx.bot.sent]
+    assert any("/claude_login" in t for t in texts)

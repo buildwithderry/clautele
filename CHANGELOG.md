@@ -6,6 +6,13 @@ bisa terjadi di versi minor dan akan ditandai **BREAKING**.
 
 ## [Belum dirilis]
 
+### Ditambahkan
+- **`/claude_login`**: login ulang akun Claude dari Telegram saat sesinya kedaluwarsa/hilang (`Failed to authenticate: OAuth`).
+  Bot mengirim URL otorisasi, user membuka di browser lalu mengirim kode balik ke chat (pesannya dihapus). Hanya bisa
+  dimulai saat Claude **belum login** (dicek lewat `claude auth status`), hanya untuk user di allowlist yang sudah
+  membuka 2FA, kedaluwarsa otomatis 10 menit, dan bisa dibatalkan dengan `/claude_login batal`. Bila prompt gagal karena
+  autentikasi, bot kini menyarankan `/claude_login` dan mencatatnya di log.
+
 ## [0.6.0] - 2026-11-06
 
 > Divalidasi terhadap VoiceStudio asli (lewat ngrok) dengan suara klon, Claude asli, dan kode bot: video neon 29 detik

@@ -45,6 +45,7 @@ Ngobrol dengan **Claude Code** yang berjalan di VPS Anda lewat **bot Telegram**.
 | `/new` | Percakapan baru, sesi tetap aktif |
 | `/stop` | Batalkan proses yang sedang berjalan |
 | `/status` | Sesi, mode, model, biaya |
+| `/claude_login` | Login ulang Claude saat sesinya kedaluwarsa (ditolak bila masih login); `/claude_login batal` membatalkan |
 | `/mode` | Ganti permission mode lewat tombol |
 | `/model <nama>` | Ganti model (kosong = default) |
 | `/id` | Tampilkan user ID Anda |
